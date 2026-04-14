@@ -75,7 +75,143 @@ const appState = {
 
 const els = {};
 
+const FIREBASE_STATE_PATH = 'painelComercialState';
+const firebaseBridge = {
+  enabled: false,
+  database: null,
+  ref: null,
+  listenerAttached: false,
+  initialLoadComplete: false,
+  lastSyncedHash: '',
+  remotePersistTimer: null
+};
+
 document.addEventListener('DOMContentLoaded', init);
+
+function exportStateSnapshot() {
+  return {
+    data: appState.data,
+    config: appState.config,
+    imports: appState.imports
+  };
+}
+
+function getStateHash(snapshot) {
+  try {
+    return JSON.stringify(snapshot || {});
+  } catch {
+    return String(Date.now());
+  }
+}
+
+function applyPersistedState(saved) {
+  appState.config.metasPorRede = defaultMetasPorRede();
+
+  if (saved) {
+    appState.data = Array.isArray(saved.data) ? saved.data : [];
+    appState.imports = Array.isArray(saved.imports)
+      ? saved.imports.sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0))
+      : [];
+    appState.config = {
+      ...appState.config,
+      ...(saved.config || {}),
+      metasPorRede: { ...defaultMetasPorRede(), ...(saved.config?.metasPorRede || {}) }
+    };
+  } else {
+    appState.data = [];
+    appState.imports = [];
+    appState.config = {
+      ...appState.config,
+      metasPorRede: defaultMetasPorRede(),
+      ultimaAtualizacao: null,
+      ultimaImportacao: null
+    };
+  }
+
+  if (looksLikeSampleData(appState.data, appState.imports)) {
+    appState.data = [];
+    appState.imports = [];
+    appState.config.ultimaAtualizacao = null;
+    appState.config.ultimaImportacao = null;
+  }
+
+  appState.data = appState.data.map(normalizeStoredRecord);
+  appState.imports = appState.imports.map(normalizeStoredImport);
+}
+
+async function initFirebaseBridge() {
+  const config = window.__SOFOLHAS_FIREBASE__ || null;
+  if (!config || !config.databaseURL || !window.firebase) return false;
+
+  try {
+    if (!window.firebase.apps.length) {
+      window.firebase.initializeApp(config);
+    }
+    firebaseBridge.database = window.firebase.database();
+    firebaseBridge.ref = firebaseBridge.database.ref(FIREBASE_STATE_PATH);
+    firebaseBridge.enabled = true;
+    subscribeRemoteState();
+    return true;
+  } catch (error) {
+    console.error('Falha ao inicializar Firebase:', error);
+    firebaseBridge.enabled = false;
+    firebaseBridge.database = null;
+    firebaseBridge.ref = null;
+    return false;
+  }
+}
+
+async function loadRemoteStateOnce() {
+  if (!firebaseBridge.enabled || !firebaseBridge.ref) return null;
+  try {
+    const snapshot = await firebaseBridge.ref.once('value');
+    return snapshot.val();
+  } catch (error) {
+    console.error('Falha ao carregar estado remoto:', error);
+    return null;
+  }
+}
+
+function subscribeRemoteState() {
+  if (!firebaseBridge.enabled || !firebaseBridge.ref || firebaseBridge.listenerAttached) return;
+  firebaseBridge.listenerAttached = true;
+
+  firebaseBridge.ref.on('value', snapshot => {
+    if (!firebaseBridge.initialLoadComplete) return;
+    const remoteState = snapshot.val();
+    if (!remoteState) return;
+
+    const remoteHash = getStateHash(remoteState);
+    if (remoteHash === firebaseBridge.lastSyncedHash) return;
+
+    applyPersistedState(remoteState);
+    firebaseBridge.lastSyncedHash = remoteHash;
+    persistLocal({ skipRemote: true });
+
+    syncLojaOptions();
+    syncSemanaOptions();
+    buildMetaInputs();
+    refreshAll();
+    renderImportBatchesTable();
+    renderAdminTable();
+  });
+}
+
+function queueRemotePersist() {
+  if (!firebaseBridge.enabled || !firebaseBridge.initialLoadComplete || !firebaseBridge.ref) return;
+  clearTimeout(firebaseBridge.remotePersistTimer);
+  firebaseBridge.remotePersistTimer = setTimeout(async () => {
+    try {
+      const snapshot = exportStateSnapshot();
+      const hash = getStateHash(snapshot);
+      if (hash === firebaseBridge.lastSyncedHash) return;
+      await firebaseBridge.ref.set(snapshot);
+      firebaseBridge.lastSyncedHash = hash;
+    } catch (error) {
+      console.error('Falha ao salvar estado remoto:', error);
+    }
+  }, 250);
+}
 
 
 function normalizeStoreKey(value) {
@@ -232,9 +368,9 @@ function normalizeStoredImport(batch) {
 
 
 
-function init() {
+async function init() {
   cacheElements();
-  seedInitialState();
+  await seedInitialState();
   buildMetaInputs();
   initCustomSelects();
   bindEvents();
@@ -321,40 +457,29 @@ function cacheElements() {
   });
 }
 
-function seedInitialState() {
+async function seedInitialState() {
   const saved = readStorage();
-  appState.config.metasPorRede = defaultMetasPorRede();
+  applyPersistedState(saved);
 
-  if (saved) {
-    appState.data = Array.isArray(saved.data) ? saved.data : [];
-    appState.imports = Array.isArray(saved.imports) ? saved.imports.sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0)) : [];
-    appState.config = {
-      ...appState.config,
-      ...(saved.config || {}),
-      metasPorRede: { ...defaultMetasPorRede(), ...(saved.config?.metasPorRede || {}) }
-    };
+  const firebaseReady = await initFirebaseBridge();
+  if (firebaseReady) {
+    const remoteState = await loadRemoteStateOnce();
+    const hasRemoteState = remoteState && (Array.isArray(remoteState.data) || Array.isArray(remoteState.imports) || remoteState.config);
+
+    if (hasRemoteState) {
+      applyPersistedState(remoteState);
+      firebaseBridge.lastSyncedHash = getStateHash(remoteState);
+      persistLocal({ skipRemote: true });
+    } else if (saved) {
+      persistLocal();
+    } else {
+      persistLocal({ skipRemote: true });
+    }
   } else {
-    appState.data = [];
-    appState.imports = [];
-    appState.config = {
-      ...appState.config,
-      metasPorRede: defaultMetasPorRede(),
-      ultimaAtualizacao: null,
-      ultimaImportacao: null
-    };
+    persistLocal({ skipRemote: true });
   }
 
-  if (looksLikeSampleData(appState.data, appState.imports)) {
-    appState.data = [];
-    appState.imports = [];
-    appState.config.ultimaAtualizacao = null;
-    appState.config.ultimaImportacao = null;
-  }
-
-  appState.data = appState.data.map(normalizeStoredRecord);
-  appState.imports = appState.imports.map(normalizeStoredImport);
-
-  persistLocal();
+  firebaseBridge.initialLoadComplete = true;
 }
 
 function defaultMetasPorRede() {
@@ -2069,8 +2194,9 @@ function readStorage() {
   return null;
 }
 
-function persistLocal() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ data: appState.data, config: appState.config, imports: appState.imports }));
+function persistLocal(options = {}) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(exportStateSnapshot()));
+  if (!options.skipRemote) queueRemotePersist();
 }
 
 function getVerificationStatusLabel(status) {
