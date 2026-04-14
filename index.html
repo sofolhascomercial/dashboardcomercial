@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Só Folhas Hortifruti | Dashboard Comercial</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside id="filterDrawer" class="drawer" aria-hidden="true">
+      <div class="drawer__header">
+        <div>
+          <p class="eyebrow">Filtros</p>
+          <h2>Refinar visualização</h2>
+        </div>
+        <button id="closeDrawerBtn" class="icon-btn" type="button" aria-label="Fechar filtros">✕</button>
+      </div>
+
+      <div class="drawer__body">
+        <div class="field">
+          <label for="filterRede">Rede</label>
+          <div id="filterRede" class="custom-select"></div>
+        </div>
+
+        <div class="field">
+          <label for="filterLoja">Loja</label>
+          <div id="filterLoja" class="custom-select"></div>
+        </div>
+
+        <div class="field">
+          <label for="filterSemana">Semana</label>
+          <div id="filterSemana" class="custom-select"></div>
+        </div>
+
+        <div class="filter-actions">
+          <button id="applyFiltersBtn" class="btn btn--primary" type="button">Aplicar</button>
+          <button id="clearFiltersBtn" class="btn btn--ghost" type="button">Limpar</button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="drawerBackdrop" class="backdrop" hidden></div>
+
+    <main class="page">
+      <header class="hero">
+        <div class="hero__actions">
+          <button id="openDrawerBtn" class="btn btn--ghost btn--icon-text" type="button">☰ <span>Filtros</span></button>
+          <button id="openAdmBtn" class="icon-btn" type="button" aria-label="Abrir área administrativa">🔒</button>
+        </div>
+
+        <div class="hero__brand">
+          <div class="hero__brand-row">
+            <img src="assets/logo-sofolhas-transparent.png" alt="Logo Só Folhas Hortifruti" class="hero__logo" />
+            <div class="hero__headline">
+              <p class="eyebrow">Dashboard Comercial</p>
+              <h1 id="viewTitle" class="hero__title">Resumo Geral da Empresa</h1>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="summary-header">
+        <div class="summary-header__text">
+          <p class="eyebrow">Visão atual</p>
+          <p id="viewSubtitle" hidden></p>
+        </div>
+        <div id="activeFiltersChips" class="chips"></div>
+      </section>
+
+      <section class="executive-grid">
+        <section class="meta-highlight card card--glow">
+          <div class="meta-highlight__main">
+            <div>
+              <p class="card-label">Meta total de venda</p>
+              <h3 id="metaPercent">0%</h3>
+              <p id="metaLegend" class="muted">Venda atual R$ 0,00 de R$ 0,00</p>
+            </div>
+            <div class="progress-circle-wrap">
+              <div class="progress-circle">
+                <svg viewBox="0 0 120 120" class="progress-svg">
+                  <circle cx="60" cy="60" r="52" class="progress-track"></circle>
+                  <circle cx="60" cy="60" r="52" class="progress-bar" id="metaCircle"></circle>
+                </svg>
+                <div class="progress-circle__text">
+                  <span id="metaPercentInner">0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="meta-highlight__stats">
+            <div>
+              <span class="card-label">Meta</span>
+              <strong id="metaTotalValue">R$ 0,00</strong>
+            </div>
+            <div>
+              <span class="card-label">Venda atual</span>
+              <strong id="salesTotalValue">R$ 0,00</strong>
+            </div>
+            <div>
+              <span class="card-label">Última importação</span>
+              <strong id="lastImportValue">--</strong>
+            </div>
+          </div>
+        </section>
+
+        <article class="card break-focus-card">
+          <div class="section-head section-head--compact">
+            <div>
+              <p class="eyebrow">Risco operacional</p>
+              <h3>Percentual de quebra</h3>
+            </div>
+          </div>
+          <div class="break-focus-card__value-row">
+            <strong id="cardPercQuebra" class="break-focus-card__value">0%</strong>
+            <span class="break-focus-card__limit">Limite aceitável: 12%</span>
+          </div>
+          <div class="break-rule-box break-rule-box--executive">
+            <div class="rule-line">
+              <span>Quebra real</span>
+              <strong id="breakRealValue">0%</strong>
+            </div>
+            <div class="rule-line">
+              <span>Status</span>
+              <strong id="breakStatusBadge" class="status-badge">Sem dados</strong>
+            </div>
+          </div>
+          <div class="break-meter">
+            <div class="break-meter__track">
+              <span class="break-meter__safe"></span>
+              <span class="break-meter__limit"></span>
+              <span class="break-meter__alert"></span>
+            </div>
+            <div class="break-meter__labels">
+              <span>Dentro da meta</span>
+              <span>No limite</span>
+              <span>Acima</span>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="cards-grid">
+        <article class="card metric-card metric-card--accent">
+          <span class="card-label">Venda total</span>
+          <strong id="cardVenda">R$ 0,00</strong>
+          <span class="metric-card__foot">Acumulado do recorte atual</span>
+        </article>
+        <article class="card metric-card metric-card--danger">
+          <span class="card-label">Quebra total</span>
+          <strong id="cardQuebra">R$ 0,00</strong>
+          <span class="metric-card__foot">Valor consolidado da quebra</span>
+        </article>
+        <article class="card metric-card">
+          <span class="card-label">Falta total</span>
+          <strong id="cardFalta">R$ 0,00</strong>
+          <span class="metric-card__foot">Somente redes com registro</span>
+        </article>
+        <article class="card metric-card">
+          <span class="card-label">Sem qualidade</span>
+          <strong id="cardQualidade">R$ 0,00</strong>
+          <span class="metric-card__foot">Ocorrências de qualidade</span>
+        </article>
+        <article class="card metric-card">
+          <span class="card-label">Quebra real</span>
+          <strong id="cardStatusQuebra">R$ 0,00</strong>
+          <span class="metric-card__foot">Quebra total - falta - qualidade</span>
+        </article>
+        <article id="stockCard" class="card metric-card metric-card--stock" hidden>
+          <span class="card-label">Estoque atual COSTA</span>
+          <strong id="cardEstoque">R$ 0,00</strong>
+          <span class="metric-card__foot">Exibido somente quando COSTA estiver selecionada</span>
+        </article>
+      </section>
+
+      <section class="charts-grid">
+        <article class="card chart-card chart-card--wide">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Performance</p>
+              <h3>Evolução de vendas</h3>
+            </div>
+            <p class="section-note">Semanal no recorte atual.</p>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="salesTrendChart"></canvas>
+          </div>
+        </article>
+
+        <article class="card chart-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Comparativo</p>
+              <h3>Quebra por rede</h3>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="breakByNetworkChart"></canvas>
+          </div>
+        </article>
+
+        <div class="performance-grid">
+          <article class="card chart-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Melhor para pior</p>
+                <h3>Ranking de quebra parcial por loja</h3>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="breakByStoreChart"></canvas>
+            </div>
+          </article>
+
+          <article class="card chart-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Melhor performance</p>
+                <h3>Menor quebra parcial por loja</h3>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="bestBreakByStoreChart"></canvas>
+            </div>
+          </article>
+        </div>
+
+        <article class="card chart-card chart-card--full promoters-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">🥇 Reconhecimento</p>
+              <h3>PROMOTORES EM DESTAQUE</h3>
+            </div>
+          </div>
+          <div id="networkWinnersPanel" class="network-winners-panel promoters-highlight-panel promoters-highlight-panel--wide"></div>
+        </article>
+      </section>
+
+      <section id="alertsGrid" class="alerts-grid"></section>
+
+      <section class="content-grid">
+        <article class="card wide-card ranking-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Ranking</p>
+              <h3>Lojas com acompanhamento de quebra</h3>
+            </div>
+            <p class="section-note">Acumulado do mês da última importação.</p>
+          </div>
+          <div id="rankingHighlights" class="ranking-highlights"></div>
+          <div class="ranking-toolbar">
+            <div class="ranking-filter-inline">
+              <label for="rankingNetworkFilter">Visualizar rede</label>
+              <select id="rankingNetworkFilter" class="ranking-select">
+                <option value="Todas">Todas as redes</option>
+              </select>
+            </div>
+          </div>
+          <div id="rankingPositivePanel" class="ranking-positive-panel"></div>
+          <div class="table-wrap ranking-table-wrap">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Rede</th>
+                  <th>Loja</th>
+                  <th>Venda acumulada</th>
+                  <th>% Quebra</th>
+                  <th>Faixa</th>
+                </tr>
+              </thead>
+              <tbody id="rankingTableBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card wide-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Consolidado</p>
+              <h3>Resumo por rede</h3>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rede</th>
+                  <th>Venda</th>
+                  <th>Meta</th>
+                  <th>% Meta</th>
+                  <th>Quebra</th>
+                  <th>% Quebra</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="summaryTableBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <div class="details-toggle-row">
+        <button id="toggleDetailsBtn" class="btn btn--ghost details-toggle-btn" type="button" aria-expanded="false" aria-controls="detailsSection">Ver detalhamento por loja</button>
+      </div>
+
+      <section id="detailsSection" class="card details-section" hidden>
+        <div class="section-head section-head--stack-mobile">
+          <div>
+            <p class="eyebrow">Detalhamento</p>
+            <h3 id="detailsTableTitle">Acumulado mensal por loja</h3>
+            <p id="detailsTableSubtitle" class="section-note">Exibe o acumulado do mês da última importação. A visão semanal aparece somente quando o filtro de semana for aplicado. O campo estoque aparece apenas quando COSTA estiver selecionada.</p>
+          </div>
+          <div>
+            <p class="card-label">Rede no detalhamento</p>
+            <div id="detailsNetworkTabs" class="network-pills"></div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="detailsTableHeadRow">
+                <th>Rede</th>
+                <th>Loja</th>
+                <th>Venda</th>
+                <th>Meta</th>
+                <th>% Meta</th>
+                <th>Quebra</th>
+                <th>Falta</th>
+                <th>Qualidade</th>
+                <th>% Quebra</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="detailsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="authModal" class="modal" hidden>
+    <div class="modal__panel">
+      <div class="modal__head">
+        <div>
+          <p class="eyebrow">Área restrita</p>
+          <h3>Acesso administrativo</h3>
+        </div>
+        <button id="closeAuthModalBtn" class="icon-btn" type="button">✕</button>
+      </div>
+      <form id="authForm" class="modal__body">
+        <div class="field">
+          <label for="authUser">Usuário</label>
+          <input id="authUser" type="text" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="authPass">Senha</label>
+          <input id="authPass" type="password" autocomplete="current-password" required />
+        </div>
+        <p id="authFeedback" class="feedback"></p>
+        <button class="btn btn--primary" type="submit">Entrar</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="admModal" class="modal modal--wide" hidden>
+    <div class="modal__panel">
+      <div class="modal__head">
+        <div>
+          <p class="eyebrow">Administração</p>
+          <h3>Painel ADM</h3>
+        </div>
+        <button id="closeAdmModalBtn" class="icon-btn" type="button">✕</button>
+      </div>
+      <div class="modal__body modal__body--stacked">
+        <div class="adm-shell">
+          <nav class="adm-nav" aria-label="Seções administrativas">
+            <button type="button" class="adm-nav__item is-active" data-adm-tab="metas">Metas</button>
+            <button type="button" class="adm-nav__item" data-adm-tab="importacao">Carregar planilha</button>
+            <button type="button" class="adm-nav__item" data-adm-tab="historico">Histórico</button>
+            <button type="button" class="adm-nav__item" data-adm-tab="registros">Registros</button>
+          </nav>
+
+          <div class="adm-panels">
+            <section class="adm-panel is-active" data-adm-panel="metas">
+              <section class="card admin-card">
+                <div class="section-head">
+                  <h4>Metas</h4>
+                </div>
+                <div class="field">
+                  <label for="metaGeralInput">Meta total de venda</label>
+                  <input id="metaGeralInput" type="text" inputmode="decimal" autocomplete="off" placeholder="R$ 0,00" />
+                </div>
+                <div id="metasRedeForm" class="admin-grid"></div>
+                <button id="saveGoalsBtn" class="btn btn--primary" type="button">Salvar metas</button>
+              </section>
+            </section>
+
+            <section class="adm-panel" data-adm-panel="importacao" hidden>
+              <section class="card admin-card">
+                <div class="section-head">
+                  <h4>Importação Excel</h4>
+                </div>
+                <div class="admin-grid admin-grid--period">
+                  <div class="field">
+                    <label for="monthInput">Mês da planilha</label>
+                    <select id="monthInput">
+                      <option value="">Selecionar mês</option>
+                      <option value="01">Janeiro</option>
+                      <option value="02">Fevereiro</option>
+                      <option value="03">Março</option>
+                      <option value="04">Abril</option>
+                      <option value="05">Maio</option>
+                      <option value="06">Junho</option>
+                      <option value="07">Julho</option>
+                      <option value="08">Agosto</option>
+                      <option value="09">Setembro</option>
+                      <option value="10">Outubro</option>
+                      <option value="11">Novembro</option>
+                      <option value="12">Dezembro</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="weekInput">Semana do mês</label>
+                    <select id="weekInput">
+                      <option value="">Selecionar semana</option>
+                      <option value="1ª semana">1ª semana</option>
+                      <option value="2ª semana">2ª semana</option>
+                      <option value="3ª semana">3ª semana</option>
+                      <option value="4ª semana">4ª semana</option>
+                      <option value="5ª semana">5ª semana</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="excelFileInput">Planilha semanal</label>
+                  <input id="excelFileInput" type="file" accept=".xlsx,.xls" />
+                </div>
+                <button id="importExcelBtn" class="btn btn--primary" type="button">Importar planilha</button>
+                <p class="helper">Cada planilha semanal deve ser vinculada ao mês e à semana correspondente. O sistema soma os dados importados, usa a última linha apenas para conferência e mantém o histórico para comparativos por período.</p>
+                <p id="importFeedback" class="feedback"></p>
+              </section>
+            </section>
+
+            <section class="adm-panel" data-adm-panel="historico" hidden>
+              <section class="card admin-card admin-card--full">
+                <div class="section-head section-head--stack-mobile">
+                  <div>
+                    <h4>Histórico das planilhas</h4>
+                    <p class="section-note">Excluir uma planilha remove também todos os dados importados por ela.</p>
+                  </div>
+                  <div>
+                    <p class="card-label">Planilhas salvas</p>
+                    <strong id="importBatchCount">0</strong>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Arquivo</th>
+                        <th>Período</th>
+                        <th>Importado em</th>
+                        <th>Registros</th>
+                        <th>Venda</th>
+                        <th>Quebra</th>
+                        <th>Conferência</th>
+                        <th>Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody id="importBatchesTableBody"></tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
+
+            <div id="verificationModal" class="modal" hidden>
+              <div class="modal__panel modal__panel--verification">
+                <div class="modal__head">
+                  <div>
+                    <p class="card-label">Conferência da importação</p>
+                    <h3 id="verificationModalTitle">Detalhes da divergência</h3>
+                  </div>
+                  <button id="closeVerificationModalBtn" class="icon-btn" type="button" aria-label="Fechar detalhes da divergência">✕</button>
+                </div>
+                <div class="modal__body modal__body--stacked">
+                  <div class="verification-modal__meta">
+                    <div class="verification-meta-card">
+                      <span>Arquivo</span>
+                      <strong id="verificationModalFileName">—</strong>
+                    </div>
+                    <div class="verification-meta-card">
+                      <span>Período</span>
+                      <strong id="verificationModalPeriod">—</strong>
+                    </div>
+                    <div class="verification-meta-card">
+                      <span>Status</span>
+                      <strong id="verificationModalStatus">—</strong>
+                    </div>
+                  </div>
+                  <div id="verificationModalBody" class="verification-modal__body"></div>
+                </div>
+              </div>
+            </div>
+
+            <section class="adm-panel" data-adm-panel="registros" hidden>
+              <section class="card admin-card admin-card--full">
+                <div class="section-head">
+                  <h4>Registros importados</h4>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Rede</th>
+                        <th>Loja</th>
+                        <th>Semana</th>
+                        <th>Venda</th>
+                        <th>Quebra</th>
+                        <th>Falta</th>
+                        <th>Qualidade</th>
+                        <th>Estoque</th>
+                        <th>% Quebra</th>
+                      </tr>
+                    </thead>
+                    <tbody id="adminTableBody"></tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
