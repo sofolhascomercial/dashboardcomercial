@@ -1,5 +1,5 @@
 window.__SOFOLHAS_FIREBASE__ = {
-  apiKey: "AIzaSyDA893dkJJVMc27Yx_Yb5uRcZuIMaEsfP8",
+  apiKey: "AIzaSyDA893dkJJVMc27Yx_Yb5uRcZulMaEsfP8",
   authDomain: "dashboard-comercial-94395.firebaseapp.com",
   databaseURL: "https://dashboard-comercial-94395-default-rtdb.firebaseio.com/",
   projectId: "dashboard-comercial-94395",
