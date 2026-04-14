@@ -60,6 +60,7 @@ const appState = {
   filters: {
     rede: 'Todas',
     loja: 'Todas',
+    mes: 'Todas',
     semana: 'Todas'
   },
   detailsRede: 'Todas',
@@ -563,6 +564,7 @@ function buildMetaInputs() {
 function initCustomSelects() {
   createCustomSelect('filterRede', [{ value: 'Todas', label: 'Todas' }, ...NETWORKS.map(n => ({ value: n.id, label: n.label }))], appState.filters.rede);
   syncLojaOptions();
+  syncMesOptions();
   syncSemanaOptions();
 }
 
@@ -600,6 +602,11 @@ function createCustomSelect(id, options, selectedValue) {
         syncLojaOptions();
       } else if (id === 'filterLoja') {
         appState.filters.loja = option.value;
+      } else if (id === 'filterMes') {
+        if (appState.filters.mes !== option.value) appState.filters.semana = 'Todas';
+        appState.filters.mes = option.value;
+        syncLojaOptions();
+        syncSemanaOptions();
       } else if (id === 'filterSemana') {
         appState.filters.semana = option.value;
       }
@@ -617,17 +624,40 @@ function createCustomSelect(id, options, selectedValue) {
 }
 
 function syncLojaOptions() {
-  const dataForStores = appState.filters.rede === 'Todas'
-    ? appState.data
-    : appState.data.filter(item => item.rede === appState.filters.rede);
+  let dataForStores = appState.data;
+  if (appState.filters.rede !== 'Todas') {
+    dataForStores = dataForStores.filter(item => item.rede === appState.filters.rede);
+  }
+  if (appState.filters.mes !== 'Todas') {
+    dataForStores = dataForStores.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
+  }
   const stores = [...new Set(dataForStores.map(item => item.loja))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const selected = stores.includes(appState.filters.loja) ? appState.filters.loja : 'Todas';
   appState.filters.loja = selected;
   createCustomSelect('filterLoja', [{ value: 'Todas', label: 'Todas' }, ...stores.map(store => ({ value: store, label: store }))], selected);
 }
 
+function formatMonthFilterLabel(monthKey) {
+  if (!monthKey || monthKey === 'Todas') return 'Todos';
+  const [year, month] = String(monthKey).split('-');
+  const monthLabel = getMonthLabel(month || '');
+  return year ? `${monthLabel}/${year}` : monthLabel;
+}
+
+function syncMesOptions() {
+  const monthKeys = [...new Set(appState.data.map(item => item.monthKey || inferRecordMonthKey(item)).filter(Boolean))]
+    .sort((a, b) => String(b).localeCompare(String(a), 'pt-BR', { numeric: true }));
+  const selected = monthKeys.includes(appState.filters.mes) ? appState.filters.mes : 'Todas';
+  appState.filters.mes = selected;
+  createCustomSelect('filterMes', [{ value: 'Todas', label: 'Todos' }, ...monthKeys.map(monthKey => ({ value: monthKey, label: formatMonthFilterLabel(monthKey) }))], selected);
+}
+
 function syncSemanaOptions() {
-  const weeks = [...new Set(appState.data.map(item => item.semana))].sort((a, b) => weekSortValue(a) - weekSortValue(b) || a.localeCompare(b, 'pt-BR', { numeric: true }));
+  let source = appState.data;
+  if (appState.filters.mes !== 'Todas') {
+    source = source.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
+  }
+  const weeks = [...new Set(source.map(item => item.semana))].sort((a, b) => weekSortValue(a) - weekSortValue(b) || a.localeCompare(b, 'pt-BR', { numeric: true }));
   const selected = weeks.includes(appState.filters.semana) ? appState.filters.semana : 'Todas';
   appState.filters.semana = selected;
   createCustomSelect('filterSemana', [{ value: 'Todas', label: 'Todas' }, ...weeks.map(week => ({ value: week, label: week }))], selected);
@@ -675,7 +705,7 @@ function setDrawer(open) {
 }
 
 function clearFilters() {
-  appState.filters = { rede: 'Todas', loja: 'Todas', semana: 'Todas' };
+  appState.filters = { rede: 'Todas', loja: 'Todas', mes: 'Todas', semana: 'Todas' };
   appState.detailsRede = 'Todas';
   appState.rankingRede = 'Todas';
   initCustomSelects();
@@ -1302,11 +1332,21 @@ function setImportFeedback(message, isError) {
 
 function getFilteredData() {
   return appState.data.filter(item => {
+    const monthKey = item.monthKey || inferRecordMonthKey(item);
     const byRede = appState.filters.rede === 'Todas' || item.rede === appState.filters.rede;
     const byLoja = appState.filters.loja === 'Todas' || item.loja === appState.filters.loja;
+    const byMes = appState.filters.mes === 'Todas' || monthKey === appState.filters.mes;
     const bySemana = appState.filters.semana === 'Todas' || item.semana === appState.filters.semana;
-    return byRede && byLoja && bySemana;
+    return byRede && byLoja && byMes && bySemana;
   });
+}
+
+function shouldUseLatestMonthFallback() {
+  return appState.filters.mes === 'Todas' && appState.filters.semana === 'Todas';
+}
+
+function getDisplayRecords(records) {
+  return shouldUseLatestMonthFallback() ? filterToLatestImportMonth(records) : records;
 }
 
 function refreshAll() {
@@ -1372,7 +1412,7 @@ function getRankingStatus(value, hasBreak = true) {
 }
 
 function renderRankingTable(filtered) {
-  const monthlyRecords = filterToLatestImportMonth(filtered);
+  const monthlyRecords = getDisplayRecords(filtered);
   const fullAggregated = aggregateByStore(monthlyRecords).sort((a, b) => {
     const aScore = Number(a.percentualQuebra || 0);
     const bScore = Number(b.percentualQuebra || 0);
@@ -1565,7 +1605,7 @@ function renderNetworkWinnersPanel(records) {
 }
 
 function renderDetailsNetworkTabs(filtered) {
-  const availableNetworks = [...new Set(filterToLatestImportMonth(filtered).map(item => item.rede))];
+  const availableNetworks = [...new Set(getDisplayRecords(filtered).map(item => item.rede))];
   const options = ['Todas', ...NETWORKS.map(n => n.id).filter(id => availableNetworks.includes(id))];
   if (!options.includes(appState.detailsRede)) appState.detailsRede = 'Todas';
   els.detailsNetworkTabs.innerHTML = options.map(option => {
@@ -1583,7 +1623,7 @@ function renderDetailsNetworkTabs(filtered) {
 }
 
 function renderTopInfo(filtered) {
-  const displayRecords = appState.filters.semana !== 'Todas' ? filtered : filterToLatestImportMonth(filtered);
+  const displayRecords = getDisplayRecords(filtered);
   const totals = aggregateRecords(displayRecords);
   const metaTarget = resolveActiveMetaTarget(displayRecords);
   const metaPercent = metaTarget > 0 ? (totals.venda / metaTarget) * 100 : 0;
@@ -1616,7 +1656,7 @@ function renderTopInfo(filtered) {
 }
 
 function renderSummaryTable(filtered) {
-  const displayRecords = appState.filters.semana !== 'Todas' ? filtered : filterToLatestImportMonth(filtered);
+  const displayRecords = getDisplayRecords(filtered);
   const networks = appState.filters.rede === 'Todas'
     ? NETWORKS.map(item => item.id)
     : [appState.filters.rede];
@@ -1652,7 +1692,7 @@ function renderSummaryTable(filtered) {
 
 function renderDetailsTable(filtered) {
   const hasWeekFilter = appState.filters.semana !== 'Todas';
-  const monthlyRecords = hasWeekFilter ? filtered : filterToLatestImportMonth(filtered);
+  const monthlyRecords = getDisplayRecords(filtered);
   const recordsForDetails = appState.detailsRede !== 'Todas' ? monthlyRecords.filter(item => item.rede === appState.detailsRede) : monthlyRecords;
   const showStock = shouldShowStock(recordsForDetails);
 
@@ -1697,7 +1737,7 @@ function renderDetailsTable(filtered) {
 
   const aggregated = aggregateByStore(recordsForDetails).sort((a, b) => a.rede.localeCompare(b.rede) || b.valorVenda - a.valorVenda);
   els.detailsTableTitle.textContent = 'Acumulado mensal por loja';
-  els.detailsTableSubtitle.textContent = 'Exibe o acumulado do mês da última importação. Para ver semana a semana, aplique o filtro de semana.';
+  els.detailsTableSubtitle.textContent = appState.filters.mes !== 'Todas' ? `Exibe o acumulado de ${formatMonthFilterLabel(appState.filters.mes)}. Para ver semana a semana, aplique o filtro de semana.` : 'Exibe o acumulado do mês da última importação. Para ver semana a semana, aplique o filtro de semana.';
   els.detailsTableHeadRow.innerHTML = `
     <th>Rede</th>
     <th>Loja</th>
@@ -1749,7 +1789,7 @@ function renderAdminTable() {
 }
 
 function renderAlerts(filtered) {
-  const displayRecords = appState.filters.semana !== 'Todas' ? filtered : filterToLatestImportMonth(filtered);
+  const displayRecords = getDisplayRecords(filtered);
   const totals = aggregateRecords(displayRecords);
   const summaryByNetwork = aggregateByNetwork(displayRecords).sort((a, b) => b.percQuebra - a.percQuebra);
   const rankingByStore = aggregateByStore(displayRecords).sort((a, b) => b.percentualQuebra - a.percentualQuebra);
@@ -1792,7 +1832,7 @@ function renderAlerts(filtered) {
 function renderCharts(filtered) {
   if (!window.Chart) return;
 
-  const monthlyBase = appState.filters.semana !== 'Todas' ? filtered : filterToLatestImportMonth(filtered);
+  const monthlyBase = getDisplayRecords(filtered);
 
   const salesSeries = buildSalesSeries(monthlyBase);
   upsertChart('salesTrend', els.salesTrendChart, {
@@ -2009,6 +2049,7 @@ function updateViewHeader(filtered, totals) {
   const parts = [];
   if (appState.filters.rede !== 'Todas') parts.push(appState.filters.rede);
   if (appState.filters.loja !== 'Todas') parts.push(appState.filters.loja);
+  if (appState.filters.mes !== 'Todas') parts.push(formatMonthFilterLabel(appState.filters.mes));
   if (appState.filters.semana !== 'Todas') parts.push(appState.filters.semana);
   if (parts.length) title = parts.join(' • ');
 
@@ -2018,6 +2059,7 @@ function updateViewHeader(filtered, totals) {
   const chips = [];
   if (appState.filters.rede !== 'Todas') chips.push(`Rede: ${appState.filters.rede}`);
   if (appState.filters.loja !== 'Todas') chips.push(`Loja: ${appState.filters.loja}`);
+  if (appState.filters.mes !== 'Todas') chips.push(`Mês: ${formatMonthFilterLabel(appState.filters.mes)}`);
   if (appState.filters.semana !== 'Todas') chips.push(`Semana: ${appState.filters.semana}`);
   els.activeFiltersChips.innerHTML = chips.map(text => `<span class="chip">${text}</span>`).join('');
 }
@@ -2030,7 +2072,7 @@ function resolveActiveMetaTarget(filtered) {
     const store = filtered[0];
     return store ? getStoreMeta(store.rede, store.loja) : 0;
   }
-  if (appState.filters.semana !== 'Todas' && filtered.length) {
+  if ((appState.filters.semana !== 'Todas' || appState.filters.mes !== 'Todas') && filtered.length) {
     const uniqueWeeks = [...new Set(appState.data.map(item => item.semana))].length || 1;
     return (appState.config.metaGeral || 0) / uniqueWeeks;
   }
@@ -2042,7 +2084,7 @@ function getRowMeta(item) {
 }
 
 function getStoreMeta(rede, loja) {
-  const monthlyNetworkRecords = filterToLatestImportMonth(appState.data).filter(record => record.rede === rede);
+  const monthlyNetworkRecords = getDisplayRecords(appState.data).filter(record => record.rede === rede);
   const uniqueStores = [...new Set(monthlyNetworkRecords.map(record => record.loja))].length || 1;
   return (appState.config.metasPorRede[rede] || 0) / uniqueStores;
 }
