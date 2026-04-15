@@ -71,7 +71,11 @@ const appState = {
   isAdmAuthenticated: false,
   customSelects: {},
   charts: {},
-  imports: []
+  imports: [],
+  presentationOpen: false,
+  presentationSlideIndex: 0,
+  presentationAutoplay: true,
+  presentationTimer: null
 };
 
 const els = {};
@@ -90,6 +94,8 @@ const firebaseBridge = {
 const FIREBASE_META_KEY_MAP = {
   'COMPER/FORT': 'COMPER_FORT'
 };
+const PRESENTATION_SLIDE_COUNT = 3;
+const PRESENTATION_ROTATE_MS = 9000;
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -498,7 +504,9 @@ async function init() {
   buildMetaInputs();
   initCustomSelects();
   bindEvents();
+  initPresentationDeck();
   refreshAll();
+  initPresentationModeFromURL();
 }
 
 function cacheElements() {
@@ -509,6 +517,36 @@ function cacheElements() {
     closeDrawerBtn: document.getElementById('closeDrawerBtn'),
     applyFiltersBtn: document.getElementById('applyFiltersBtn'),
     clearFiltersBtn: document.getElementById('clearFiltersBtn'),
+    openPresentationBtn: document.getElementById('openPresentationBtn'),
+    closePresentationBtn: document.getElementById('closePresentationBtn'),
+    presentationFullscreenBtn: document.getElementById('presentationFullscreenBtn'),
+    presentationAutoplayBtn: document.getElementById('presentationAutoplayBtn'),
+    presentationPrevBtn: document.getElementById('presentationPrevBtn'),
+    presentationNextBtn: document.getElementById('presentationNextBtn'),
+    presentationSlideLabel: document.getElementById('presentationSlideLabel'),
+    presentationDots: document.getElementById('presentationDots'),
+    presentationView: document.getElementById('presentationView'),
+    presentationTitle: document.getElementById('presentationTitle'),
+    presentationSubtitle: document.getElementById('presentationSubtitle'),
+    presentationMetaPercent: document.getElementById('presentationMetaPercent'),
+    presentationMetaLegend: document.getElementById('presentationMetaLegend'),
+    presentationMetaValue: document.getElementById('presentationMetaValue'),
+    presentationSalesValue: document.getElementById('presentationSalesValue'),
+    presentationLastImport: document.getElementById('presentationLastImport'),
+    presentationBreakPercent: document.getElementById('presentationBreakPercent'),
+    presentationBreakReal: document.getElementById('presentationBreakReal'),
+    presentationBreakStatus: document.getElementById('presentationBreakStatus'),
+    presentationCardVenda: document.getElementById('presentationCardVenda'),
+    presentationCardQuebra: document.getElementById('presentationCardQuebra'),
+    presentationCardFalta: document.getElementById('presentationCardFalta'),
+    presentationCardQualidade: document.getElementById('presentationCardQualidade'),
+    presentationCardQuebraReal: document.getElementById('presentationCardQuebraReal'),
+    presentationStockCard: document.getElementById('presentationStockCard'),
+    presentationCardEstoque: document.getElementById('presentationCardEstoque'),
+    presentationSummaryBody: document.getElementById('presentationSummaryBody'),
+    presentationBestStores: document.getElementById('presentationBestStores'),
+    presentationWorstStores: document.getElementById('presentationWorstStores'),
+    presentationSlides: [...document.querySelectorAll('[data-presentation-slide]')],
     openAdmBtn: document.getElementById('openAdmBtn'),
     authModal: document.getElementById('authModal'),
     closeAuthModalBtn: document.getElementById('closeAuthModalBtn'),
@@ -818,6 +856,22 @@ function bindEvents() {
   if (els.openDrawerBtn) els.openDrawerBtn.addEventListener('click', () => setDrawer(true));
   if (els.closeDrawerBtn) els.closeDrawerBtn.addEventListener('click', () => setDrawer(false));
   if (els.drawerBackdrop) els.drawerBackdrop.addEventListener('click', () => setDrawer(false));
+  if (els.openPresentationBtn) els.openPresentationBtn.addEventListener('click', () => setPresentationMode(true));
+  if (els.closePresentationBtn) els.closePresentationBtn.addEventListener('click', () => setPresentationMode(false));
+  if (els.presentationFullscreenBtn) els.presentationFullscreenBtn.addEventListener('click', togglePresentationFullscreen);
+  if (els.presentationAutoplayBtn) els.presentationAutoplayBtn.addEventListener('click', togglePresentationAutoplay);
+  if (els.presentationPrevBtn) els.presentationPrevBtn.addEventListener('click', () => changePresentationSlide(-1, { restartAutoplay: true }));
+  if (els.presentationNextBtn) els.presentationNextBtn.addEventListener('click', () => changePresentationSlide(1, { restartAutoplay: true }));
+  document.addEventListener('keydown', event => {
+    if (!appState.presentationOpen) return;
+    if (event.key === 'Escape') setPresentationMode(false);
+    if (event.key === 'ArrowRight') changePresentationSlide(1, { restartAutoplay: true });
+    if (event.key === 'ArrowLeft') changePresentationSlide(-1, { restartAutoplay: true });
+    if (event.key === ' ') {
+      event.preventDefault();
+      togglePresentationAutoplay();
+    }
+  });
   if (els.applyFiltersBtn) els.applyFiltersBtn.addEventListener('click', () => {
     setDrawer(false);
     refreshAll();
@@ -1499,6 +1553,97 @@ function getDisplayRecords(records) {
   return shouldUseLatestMonthFallback() ? filterToLatestImportMonth(records) : records;
 }
 
+
+function initPresentationDeck() {
+  if (!els.presentationDots) return;
+  els.presentationDots.innerHTML = Array.from({ length: PRESENTATION_SLIDE_COUNT }, (_, index) => `
+    <button class="presentation-dot${index === appState.presentationSlideIndex ? ' is-active' : ''}" type="button" data-presentation-dot="${index}" aria-label="Ir para tela ${index + 1}"></button>
+  `).join('');
+  [...els.presentationDots.querySelectorAll('[data-presentation-dot]')].forEach(button => {
+    button.addEventListener('click', () => {
+      appState.presentationSlideIndex = Number(button.dataset.presentationDot || 0);
+      updatePresentationSlides();
+      restartPresentationAutoplay();
+    });
+  });
+  updatePresentationSlides();
+  updatePresentationAutoplayUI();
+}
+
+function updatePresentationSlides() {
+  const safeIndex = ((Number(appState.presentationSlideIndex) || 0) + PRESENTATION_SLIDE_COUNT) % PRESENTATION_SLIDE_COUNT;
+  appState.presentationSlideIndex = safeIndex;
+  if (els.presentationSlides?.length) {
+    els.presentationSlides.forEach((slide, index) => {
+      const active = index === safeIndex;
+      slide.hidden = !active;
+      slide.classList.toggle('is-active', active);
+    });
+  }
+  if (els.presentationSlideLabel) {
+    els.presentationSlideLabel.textContent = `Tela ${safeIndex + 1} de ${PRESENTATION_SLIDE_COUNT}`;
+  }
+  if (els.presentationDots) {
+    [...els.presentationDots.querySelectorAll('[data-presentation-dot]')].forEach((button, index) => {
+      button.classList.toggle('is-active', index === safeIndex);
+    });
+  }
+}
+
+function updatePresentationAutoplayUI() {
+  if (els.presentationView) {
+    els.presentationView.classList.toggle('is-autoplaying', appState.presentationAutoplay);
+  }
+  if (els.presentationAutoplayBtn) {
+    els.presentationAutoplayBtn.innerHTML = appState.presentationAutoplay
+      ? '❚❚ <span>Pausar rotação</span>'
+      : '▶ <span>Retomar rotação</span>';
+  }
+}
+
+function stopPresentationAutoplay() {
+  if (appState.presentationTimer) {
+    clearInterval(appState.presentationTimer);
+    appState.presentationTimer = null;
+  }
+}
+
+function startPresentationAutoplay() {
+  stopPresentationAutoplay();
+  if (!appState.presentationOpen || !appState.presentationAutoplay) return;
+  appState.presentationTimer = setInterval(() => {
+    changePresentationSlide(1);
+  }, PRESENTATION_ROTATE_MS);
+}
+
+function restartPresentationAutoplay() {
+  if (!appState.presentationAutoplay) return;
+  startPresentationAutoplay();
+}
+
+function togglePresentationAutoplay() {
+  appState.presentationAutoplay = !appState.presentationAutoplay;
+  updatePresentationAutoplayUI();
+  if (appState.presentationAutoplay) startPresentationAutoplay();
+  else stopPresentationAutoplay();
+}
+
+function changePresentationSlide(step = 1, { restartAutoplay = false } = {}) {
+  appState.presentationSlideIndex = (appState.presentationSlideIndex + step + PRESENTATION_SLIDE_COUNT) % PRESENTATION_SLIDE_COUNT;
+  updatePresentationSlides();
+  if (restartAutoplay) restartPresentationAutoplay();
+}
+
+function initPresentationModeFromURL() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('apresentacao') === '1') {
+      setPresentationMode(true);
+    }
+  } catch {}
+}
+
+
 function refreshAll() {
   const filtered = getFilteredData();
   renderTopInfo(filtered);
@@ -1509,8 +1654,134 @@ function refreshAll() {
   updateDetailsSectionVisibility();
   renderAlerts(filtered);
   renderCharts(filtered);
+  renderPresentationView(filtered);
   renderImportBatchesTable();
   renderAdminTable();
+}
+
+function setPresentationMode(open) {
+  appState.presentationOpen = Boolean(open);
+  if (els.presentationView) els.presentationView.hidden = !appState.presentationOpen;
+  document.body.classList.toggle('presentation-open', appState.presentationOpen);
+  if (appState.presentationOpen) {
+    renderPresentationView(getFilteredData());
+    updatePresentationSlides();
+    updatePresentationAutoplayUI();
+    startPresentationAutoplay();
+  } else {
+    stopPresentationAutoplay();
+    if (document.fullscreenElement === els.presentationView) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+}
+
+function togglePresentationFullscreen() {
+  if (!els.presentationView) return;
+  if (document.fullscreenElement === els.presentationView) {
+    document.exitFullscreen().catch(() => {});
+    return;
+  }
+  els.presentationView.requestFullscreen?.().catch(() => {});
+}
+
+function buildPresentationScopeLabel(records) {
+  const parts = [];
+  if (appState.filters.rede !== 'Todas') parts.push(appState.filters.rede);
+  if (appState.filters.loja !== 'Todas') parts.push(appState.filters.loja);
+  if (appState.filters.mes !== 'Todas') parts.push(formatMonthFilterLabel(appState.filters.mes));
+  else if (shouldUseLatestMonthFallback()) {
+    const latestMonthKey = getLatestImportMonthKey();
+    if (latestMonthKey) parts.push(formatMonthFilterLabel(latestMonthKey));
+  }
+  if (appState.filters.semana !== 'Todas') parts.push(appState.filters.semana);
+  if (!parts.length) return 'Visão geral da empresa';
+  return parts.join(' • ');
+}
+
+function renderPresentationStoreList(items, targetEl, emptyText) {
+  if (!targetEl) return;
+  if (!items.length) {
+    targetEl.innerHTML = `<div class="presentation-store-item"><span class="presentation-store-item__meta">${emptyText}</span></div>`;
+    return;
+  }
+
+  targetEl.innerHTML = items.map((item, index) => `
+    <article class="presentation-store-item">
+      <div class="presentation-store-item__top">
+        <strong class="presentation-store-item__store">${index + 1}. ${item.loja}</strong>
+        <span class="status-badge ${getBreakStatus(item.percentualQuebra).className}">${formatPercent(item.percentualQuebra)}</span>
+      </div>
+      <span class="presentation-store-item__network">${item.rede}</span>
+      <span class="presentation-store-item__meta">Venda ${formatCurrency(item.valorVenda)}</span>
+    </article>
+  `).join('');
+}
+
+function renderPresentationView(filtered) {
+  if (!els.presentationView) return;
+
+  const displayRecords = getDisplayRecords(filtered);
+  const totals = aggregateRecords(displayRecords);
+  const metaTarget = resolveActiveMetaTarget(displayRecords);
+  const metaPercent = metaTarget > 0 ? (totals.venda / metaTarget) * 100 : 0;
+  const quebraReal = Math.max(0, totals.quebra - totals.falta - totals.qualidade);
+  const percQuebraReal = totals.venda > 0 ? (quebraReal / totals.venda) * 100 : 0;
+  const status = getBreakStatus(percQuebraReal);
+  const stockVisible = displayRecords.some(item => item.rede === 'COSTA');
+  const totalStock = getLatestCostaStockTotal(displayRecords);
+  const summary = aggregateByNetwork(displayRecords);
+  const ranking = aggregateByStore(displayRecords).filter(item => item.valorVenda > 0);
+  const bestStores = [...ranking].sort((a, b) => Number(a.percentualQuebra || 0) - Number(b.percentualQuebra || 0) || b.valorVenda - a.valorVenda).slice(0, 5);
+  const worstStores = [...ranking].sort((a, b) => Number(b.percentualQuebra || 0) - Number(a.percentualQuebra || 0) || b.valorVenda - a.valorVenda).slice(0, 5);
+
+  if (els.presentationTitle) els.presentationTitle.textContent = els.viewTitle?.textContent || 'Resumo Geral da Empresa';
+  if (els.presentationSubtitle) els.presentationSubtitle.textContent = buildPresentationScopeLabel(displayRecords);
+  if (els.presentationMetaPercent) els.presentationMetaPercent.textContent = `${metaPercent.toFixed(0)}%`;
+  if (els.presentationMetaLegend) els.presentationMetaLegend.textContent = `Venda atual ${formatCurrency(totals.venda)} de ${formatCurrency(metaTarget)}`;
+  if (els.presentationMetaValue) els.presentationMetaValue.textContent = formatCurrency(metaTarget);
+  if (els.presentationSalesValue) els.presentationSalesValue.textContent = formatCurrency(totals.venda);
+  if (els.presentationLastImport) els.presentationLastImport.textContent = formatDateTime(appState.config.ultimaImportacao);
+  if (els.presentationBreakPercent) els.presentationBreakPercent.textContent = formatPercent(percQuebraReal);
+  if (els.presentationBreakReal) els.presentationBreakReal.textContent = formatCurrency(quebraReal);
+  if (els.presentationBreakStatus) {
+    els.presentationBreakStatus.textContent = status.label;
+    els.presentationBreakStatus.className = `status-badge ${status.className}`;
+  }
+
+  if (els.presentationCardVenda) els.presentationCardVenda.textContent = formatCurrency(totals.venda);
+  if (els.presentationCardQuebra) els.presentationCardQuebra.textContent = formatCurrency(totals.quebra);
+  if (els.presentationCardFalta) els.presentationCardFalta.textContent = formatCurrency(totals.falta);
+  if (els.presentationCardQualidade) els.presentationCardQualidade.textContent = formatCurrency(totals.qualidade);
+  if (els.presentationCardQuebraReal) els.presentationCardQuebraReal.textContent = formatCurrency(quebraReal);
+  if (els.presentationStockCard) els.presentationStockCard.hidden = !stockVisible;
+  if (stockVisible && els.presentationCardEstoque) els.presentationCardEstoque.textContent = formatCurrency(totalStock);
+
+  if (els.presentationSummaryBody) {
+    const networks = (appState.filters.rede === 'Todas' ? NETWORKS.map(item => item.id) : [appState.filters.rede]);
+    els.presentationSummaryBody.innerHTML = networks.map(networkId => {
+      const row = summary.find(item => item.rede === networkId);
+      const venda = Number(row?.venda || 0);
+      const percQuebra = Number(row?.percQuebra || 0);
+      const meta = Number(appState.config.metasPorRede[networkId] || 0);
+      const percentMeta = meta > 0 ? (venda / meta) * 100 : 0;
+      const rowStatus = getBreakStatus(percQuebra);
+      return `
+        <tr>
+          <td>${networkId}</td>
+          <td>${formatCurrency(venda)}</td>
+          <td>${formatCurrency(meta)}</td>
+          <td>${percentMeta.toFixed(0)}%</td>
+          <td>${formatPercent(percQuebra)}</td>
+          <td><span class="status-badge ${rowStatus.className}">${rowStatus.label}</span></td>
+        </tr>`;
+    }).join('') || `<tr><td colspan="6">Nenhum dado disponível para apresentação.</td></tr>`;
+  }
+
+  renderPresentationStoreList(bestStores, els.presentationBestStores, 'Nenhuma loja encontrada no recorte atual.');
+  renderPresentationStoreList(worstStores, els.presentationWorstStores, 'Nenhuma loja encontrada no recorte atual.');
+  updatePresentationSlides();
+  updatePresentationAutoplayUI();
 }
 
 function getLatestImportMonthKey() {

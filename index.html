@@ -51,6 +51,7 @@
       <header class="hero">
         <div class="hero__actions">
           <button id="openDrawerBtn" class="btn btn--ghost btn--icon-text" type="button">☰ <span>Filtros</span></button>
+          <button id="openPresentationBtn" class="btn btn--ghost btn--icon-text" type="button">▣ <span>Apresentação</span></button>
           <button id="openAdmBtn" class="icon-btn" type="button" aria-label="Abrir área administrativa">🔒</button>
         </div>
 
@@ -342,6 +343,135 @@
         </div>
       </section>
     </main>
+  </div>
+
+
+
+  <div id="presentationView" class="presentation-view" hidden>
+    <div class="presentation-view__inner">
+      <header class="presentation-view__header">
+        <div class="presentation-brand">
+          <img src="assets/logo-sofolhas-transparent.png" alt="Logo Só Folhas Hortifruti" class="presentation-brand__logo" />
+          <div>
+            <p class="eyebrow">Modo apresentação</p>
+            <h2 id="presentationTitle" class="presentation-view__title">Resumo Geral da Empresa</h2>
+            <p id="presentationSubtitle" class="presentation-view__subtitle">Visão executiva do recorte atual</p>
+          </div>
+        </div>
+        <div class="presentation-view__actions">
+          <span id="presentationSlideLabel" class="presentation-slide-label">Tela 1 de 3</span>
+          <button id="presentationPrevBtn" class="btn btn--ghost btn--icon-text" type="button">← <span>Anterior</span></button>
+          <button id="presentationAutoplayBtn" class="btn btn--ghost btn--icon-text" type="button">❚❚ <span>Pausar rotação</span></button>
+          <button id="presentationNextBtn" class="btn btn--ghost btn--icon-text" type="button">→ <span>Próxima</span></button>
+          <button id="presentationFullscreenBtn" class="btn btn--ghost btn--icon-text" type="button">⛶ <span>Tela cheia</span></button>
+          <button id="closePresentationBtn" class="btn btn--ghost btn--icon-text" type="button">✕ <span>Fechar</span></button>
+        </div>
+      </header>
+
+      <div class="presentation-slides">
+        <section class="presentation-slide is-active" data-presentation-slide="0">
+          <section class="presentation-hero-grid">
+            <article class="card presentation-card presentation-card--primary">
+              <div>
+                <p class="card-label">Meta total de venda</p>
+                <strong id="presentationMetaPercent" class="presentation-emphasis">0%</strong>
+                <p id="presentationMetaLegend" class="muted">Venda atual R$ 0,00 de R$ 0,00</p>
+              </div>
+              <div class="presentation-card__side">
+                <div>
+                  <span class="card-label">Meta</span>
+                  <strong id="presentationMetaValue">R$ 0,00</strong>
+                </div>
+                <div>
+                  <span class="card-label">Venda atual</span>
+                  <strong id="presentationSalesValue">R$ 0,00</strong>
+                </div>
+                <div>
+                  <span class="card-label">Última importação</span>
+                  <strong id="presentationLastImport">--</strong>
+                </div>
+              </div>
+            </article>
+
+            <article class="card presentation-card">
+              <div>
+                <p class="card-label">Risco operacional</p>
+                <strong id="presentationBreakPercent" class="presentation-emphasis presentation-emphasis--danger">0%</strong>
+                <p class="muted">Percentual de quebra real do recorte atual</p>
+              </div>
+              <div class="presentation-card__side">
+                <div>
+                  <span class="card-label">Quebra real</span>
+                  <strong id="presentationBreakReal">R$ 0,00</strong>
+                </div>
+                <div>
+                  <span class="card-label">Status</span>
+                  <strong id="presentationBreakStatus" class="status-badge">Sem dados</strong>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section class="presentation-metrics-grid">
+            <article class="card metric-card"><span class="card-label">Venda total</span><strong id="presentationCardVenda">R$ 0,00</strong></article>
+            <article class="card metric-card"><span class="card-label">Quebra total</span><strong id="presentationCardQuebra">R$ 0,00</strong></article>
+            <article class="card metric-card"><span class="card-label">Falta total</span><strong id="presentationCardFalta">R$ 0,00</strong></article>
+            <article class="card metric-card"><span class="card-label">Sem qualidade</span><strong id="presentationCardQualidade">R$ 0,00</strong></article>
+            <article class="card metric-card"><span class="card-label">Quebra real</span><strong id="presentationCardQuebraReal">R$ 0,00</strong></article>
+            <article id="presentationStockCard" class="card metric-card" hidden><span class="card-label">Estoque atual COSTA</span><strong id="presentationCardEstoque">R$ 0,00</strong></article>
+          </section>
+        </section>
+
+        <section class="presentation-slide" data-presentation-slide="1" hidden>
+          <article class="card presentation-slide-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Consolidado</p>
+                <h3>Resumo por rede</h3>
+              </div>
+            </div>
+            <div class="table-wrap presentation-table-wrap">
+              <table class="presentation-table">
+                <thead>
+                  <tr>
+                    <th>Rede</th>
+                    <th>Venda</th>
+                    <th>Meta</th>
+                    <th>% Meta</th>
+                    <th>% Quebra</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="presentationSummaryBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="presentation-slide" data-presentation-slide="2" hidden>
+          <article class="card presentation-slide-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Destaques</p>
+                <h3>Melhores e piores lojas</h3>
+              </div>
+            </div>
+            <div class="presentation-ranking-grid">
+              <div>
+                <h4 class="presentation-list-title">Menor quebra</h4>
+                <div id="presentationBestStores" class="presentation-store-list"></div>
+              </div>
+              <div>
+                <h4 class="presentation-list-title">Maior quebra</h4>
+                <div id="presentationWorstStores" class="presentation-store-list"></div>
+              </div>
+            </div>
+          </article>
+        </section>
+      </div>
+
+      <div id="presentationDots" class="presentation-dots" aria-label="Navegação da apresentação"></div>
+    </div>
   </div>
 
   <div id="authModal" class="modal" hidden>
