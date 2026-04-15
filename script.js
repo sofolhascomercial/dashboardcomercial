@@ -87,12 +87,35 @@ const firebaseBridge = {
   remotePersistTimer: null
 };
 
+const FIREBASE_META_KEY_MAP = {
+  'COMPER/FORT': 'COMPER_FORT'
+};
+
+function serializeMetaKeysForFirebase(source = {}) {
+  return Object.fromEntries(
+    Object.entries(source).map(([key, value]) => [FIREBASE_META_KEY_MAP[key] || key, value])
+  );
+}
+
+function deserializeMetaKeysFromFirebase(source = {}) {
+  const reverseMap = Object.fromEntries(
+    Object.entries(FIREBASE_META_KEY_MAP).map(([original, safe]) => [safe, original])
+  );
+
+  return Object.fromEntries(
+    Object.entries(source).map(([key, value]) => [reverseMap[key] || key, value])
+  );
+}
+
 document.addEventListener('DOMContentLoaded', init);
 
 function exportStateSnapshot() {
   return {
     data: appState.data,
-    config: appState.config,
+    config: {
+      ...appState.config,
+      metasPorRede: serializeMetaKeysForFirebase(appState.config.metasPorRede)
+    },
     imports: appState.imports
   };
 }
@@ -116,7 +139,10 @@ function applyPersistedState(saved) {
     appState.config = {
       ...appState.config,
       ...(saved.config || {}),
-      metasPorRede: { ...defaultMetasPorRede(), ...(saved.config?.metasPorRede || {}) }
+      metasPorRede: {
+        ...defaultMetasPorRede(),
+        ...deserializeMetaKeysFromFirebase(saved.config?.metasPorRede || {})
+      }
     };
   } else {
     appState.data = [];
