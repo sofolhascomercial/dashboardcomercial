@@ -1,0 +1,32 @@
+DASHBOARD COMERCIAL SÓ FOLHAS — CORREÇÃO 30/08/2026
+
+Arquivos para substituir no servidor:
+- index.html
+- script.js
+- style.css
+- firebase-config.js
+
+Mantenha a pasta assets/ já existente no servidor (ela contém a logo e outros recursos).
+
+Depois de subir os arquivos:
+1. Abra o sistema e entre no ADM.
+2. Reimporte AGOSTO na ordem: 1ª semana, 2ª semana e 3ª semana.
+3. Se já existir uma importação do mesmo mês/semana, o sistema agora substitui o período em vez de somar novamente.
+
+Correções incluídas:
+- ASSAÍ passa a ler VENDA, QUEBRA e PERCENTUAL.
+- Quebra real/parcial não soma DEV. FALTA e DEV. QUALIDADE.
+- Conferência automática passa a validar a quebra do ASSAÍ.
+- NOSSA KAZA entra pelo consolidado SÓ FOLHAS TOTAL quando não houver aba detalhada.
+- Estoque COSTA acumula corretamente as semanas no consolidado mensal.
+- Fechamento parcial COSTA Agosto/2026 (1ª a 3ª semana) conciliado para R$ 1.120.832,00 de venda.
+- Reimportação da mesma semana substitui a base anterior e evita duplicidade.
+
+Valores de controle esperados após reimportar as 3 semanas:
+- Venda total: R$ 3.927.931,57
+- Quebra real: R$ 548.896,62
+- Falta: R$ 63.255,43
+- Qualidade: R$ 19.777,76
+- Estoque COSTA: R$ 99.593,74
+- Quebra geral: 13,97%
+- ASSAÍ: Venda R$ 233.702,20 | Quebra R$ 32.898,80 | 14,08%

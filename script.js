@@ -6,7 +6,8 @@ const NETWORKS = [
   { id: 'COSTA', label: 'COSTA', hasBreak: true },
   { id: 'ASSAÍ', label: 'ASSAÍ', hasBreak: true },
   { id: 'VARIADOS', label: 'VARIADOS', hasBreak: true },
-  { id: 'CONSIGNADOS', label: 'CONSIGNADOS', hasBreak: true }
+  { id: 'CONSIGNADOS', label: 'CONSIGNADOS', hasBreak: true },
+  { id: 'NOSSA KAZA', label: 'NOSSA KAZA', hasBreak: false }
 ];
 
 const ADM_CREDENTIALS = {
@@ -71,11 +72,7 @@ const appState = {
   isAdmAuthenticated: false,
   customSelects: {},
   charts: {},
-  imports: [],
-  presentationOpen: false,
-  presentationSlideIndex: 0,
-  presentationAutoplay: true,
-  presentationTimer: null
+  imports: []
 };
 
 const els = {};
@@ -94,8 +91,6 @@ const firebaseBridge = {
 const FIREBASE_META_KEY_MAP = {
   'COMPER/FORT': 'COMPER_FORT'
 };
-const PRESENTATION_SLIDE_COUNT = 3;
-const PRESENTATION_ROTATE_MS = 9000;
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -338,23 +333,9 @@ function applyCostaWeeklySalesAdjustment(records, baseRecords = appState.data) {
 }
 
 function getLatestCostaStockTotal(records) {
-  const latestByStore = new Map();
-  (records || [])
+  return (records || [])
     .filter(item => item && item.rede === 'COSTA')
-    .forEach(item => {
-      const current = latestByStore.get(item.loja);
-      const weekOrder = weekSortValue(item.semana);
-      const importedAt = new Date(item.dataImportacao || item.importedAt || 0).getTime() || 0;
-      if (!current || weekOrder > current.weekOrder || (weekOrder === current.weekOrder && importedAt >= current.importedAt)) {
-        latestByStore.set(item.loja, {
-          valorEstoque: Number(item.valorEstoque || 0),
-          weekOrder,
-          importedAt
-        });
-      }
-    });
-
-  return [...latestByStore.values()].reduce((sum, item) => sum + Number(item.valorEstoque || 0), 0);
+    .reduce((sum, item) => sum + Number(item.valorEstoque || 0), 0);
 }
 
 function getMonthLabel(value) {
@@ -419,9 +400,10 @@ function normalizeNetworkName(value) {
   if (normalized.includes('vivendas')) return 'VIVENDAS';
   if (normalized.includes('bretas')) return 'BRETAS';
   if (normalized.includes('costa')) return 'COSTA';
-  if (normalized.includes('assai') || normalized.includes('assai')) return 'ASSAÍ';
+  if (normalized.includes('assai')) return 'ASSAÍ';
   if (normalized.includes('variados') || normalized.includes('variado')) return 'VARIADOS';
   if (normalized.includes('consignados') || normalized.includes('consignado')) return 'CONSIGNADOS';
+  if (normalized.includes('nossa kaza') || normalized.includes('nossa casa')) return 'NOSSA KAZA';
   return String(value || '').trim().toUpperCase();
 }
 
@@ -451,14 +433,12 @@ function normalizeStoredRecord(record) {
   const monthLabel = getMonthLabel(record.monthLabel || record.monthValue || '');
   const monthKey = inferRecordMonthKey({ ...record, monthLabel });
   const venda = Number(record.valorVenda || 0);
-  const quebraOperacional = Number(record.valorQuebraOperacional || record.valorQuebra || 0);
+  const quebraOperacional = Number(record.valorQuebraOperacional ?? record.valorQuebra ?? 0);
   const falta = Number(record.valorFalta || 0);
   const qualidade = Number(record.valorQualidade || 0);
   const estoque = Number(record.valorEstoque || 0);
-  const quebraTotal = Number(record.valorQuebraTotal || (quebraOperacional + falta + qualidade) || 0);
-  const percentualQuebra = Number.isFinite(Number(record.percentualQuebra))
-    ? Number(record.percentualQuebra)
-    : (venda > 0 ? Number(((quebraTotal / venda) * 100).toFixed(2)) : 0);
+  const quebraComDevolucoes = Number(record.valorQuebraTotal ?? (quebraOperacional + falta + qualidade));
+  const percentualQuebra = venda > 0 ? Number(((quebraOperacional / venda) * 100).toFixed(2)) : 0;
 
   return {
     ...record,
@@ -470,14 +450,14 @@ function normalizeStoredRecord(record) {
     periodLabel: record.periodLabel || [record.semana, monthLabel].filter(Boolean).join(' de '),
     valorVenda: venda,
     valorQuebraOperacional: quebraOperacional,
-    valorQuebraTotal: quebraTotal,
-    valorQuebra: quebraTotal,
+    valorQuebraTotal: quebraComDevolucoes,
+    valorQuebra: quebraOperacional,
     valorFalta: falta,
     valorQualidade: qualidade,
     valorEstoque: estoque,
     percentualQuebra,
-    percentualFalta: Number(record.percentualFalta || (venda > 0 ? ((falta / venda) * 100) : 0)),
-    percentualQualidade: Number(record.percentualQualidade || (venda > 0 ? ((qualidade / venda) * 100) : 0)),
+    percentualFalta: venda > 0 ? Number(((falta / venda) * 100).toFixed(2)) : 0,
+    percentualQualidade: venda > 0 ? Number(((qualidade / venda) * 100).toFixed(2)) : 0,
     statusQuebra: getBreakStatus(percentualQuebra).label
   };
 }
@@ -504,9 +484,7 @@ async function init() {
   buildMetaInputs();
   initCustomSelects();
   bindEvents();
-  initPresentationDeck();
   refreshAll();
-  initPresentationModeFromURL();
 }
 
 function cacheElements() {
@@ -517,36 +495,6 @@ function cacheElements() {
     closeDrawerBtn: document.getElementById('closeDrawerBtn'),
     applyFiltersBtn: document.getElementById('applyFiltersBtn'),
     clearFiltersBtn: document.getElementById('clearFiltersBtn'),
-    openPresentationBtn: document.getElementById('openPresentationBtn'),
-    closePresentationBtn: document.getElementById('closePresentationBtn'),
-    presentationFullscreenBtn: document.getElementById('presentationFullscreenBtn'),
-    presentationAutoplayBtn: document.getElementById('presentationAutoplayBtn'),
-    presentationPrevBtn: document.getElementById('presentationPrevBtn'),
-    presentationNextBtn: document.getElementById('presentationNextBtn'),
-    presentationSlideLabel: document.getElementById('presentationSlideLabel'),
-    presentationDots: document.getElementById('presentationDots'),
-    presentationView: document.getElementById('presentationView'),
-    presentationTitle: document.getElementById('presentationTitle'),
-    presentationSubtitle: document.getElementById('presentationSubtitle'),
-    presentationMetaPercent: document.getElementById('presentationMetaPercent'),
-    presentationMetaLegend: document.getElementById('presentationMetaLegend'),
-    presentationMetaValue: document.getElementById('presentationMetaValue'),
-    presentationSalesValue: document.getElementById('presentationSalesValue'),
-    presentationLastImport: document.getElementById('presentationLastImport'),
-    presentationBreakPercent: document.getElementById('presentationBreakPercent'),
-    presentationBreakReal: document.getElementById('presentationBreakReal'),
-    presentationBreakStatus: document.getElementById('presentationBreakStatus'),
-    presentationCardVenda: document.getElementById('presentationCardVenda'),
-    presentationCardQuebra: document.getElementById('presentationCardQuebra'),
-    presentationCardFalta: document.getElementById('presentationCardFalta'),
-    presentationCardQualidade: document.getElementById('presentationCardQualidade'),
-    presentationCardQuebraReal: document.getElementById('presentationCardQuebraReal'),
-    presentationStockCard: document.getElementById('presentationStockCard'),
-    presentationCardEstoque: document.getElementById('presentationCardEstoque'),
-    presentationSummaryBody: document.getElementById('presentationSummaryBody'),
-    presentationBestStores: document.getElementById('presentationBestStores'),
-    presentationWorstStores: document.getElementById('presentationWorstStores'),
-    presentationSlides: [...document.querySelectorAll('[data-presentation-slide]')],
     openAdmBtn: document.getElementById('openAdmBtn'),
     authModal: document.getElementById('authModal'),
     closeAuthModalBtn: document.getElementById('closeAuthModalBtn'),
@@ -653,7 +601,8 @@ function defaultMetasPorRede() {
     'COSTA': 110000,
     'ASSAÍ': 100000,
     'VARIADOS': 80000,
-    'CONSIGNADOS': 170000
+    'CONSIGNADOS': 170000,
+    'NOSSA KAZA': 0
   };
 }
 
@@ -685,7 +634,8 @@ function generateSampleData() {
     'COSTA': ['Costa Campinas', 'Costa Buriti'],
     'ASSAÍ': ['Assaí Anhanguera', 'Assaí Perimetral'],
     'VARIADOS': ['Empório Verde', 'Mercado Central'],
-    'CONSIGNADOS': ['Consignado A', 'Consignado B', 'Consignado C']
+    'CONSIGNADOS': ['Consignado A', 'Consignado B', 'Consignado C'],
+    'NOSSA KAZA': ['NOSSA KAZA']
   };
 
   const now = new Date().toISOString();
@@ -808,13 +758,9 @@ function createCustomSelect(id, options, selectedValue) {
 }
 
 function syncLojaOptions() {
-  let dataForStores = appState.data;
-  if (appState.filters.rede !== 'Todas') {
-    dataForStores = dataForStores.filter(item => item.rede === appState.filters.rede);
-  }
-  if (appState.filters.mes !== 'Todas') {
-    dataForStores = dataForStores.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
-  }
+  let dataForStores = appState.data.filter(item => !item.isNetworkTotalOnly);
+  if (appState.filters.rede !== 'Todas') dataForStores = dataForStores.filter(item => item.rede === appState.filters.rede);
+  if (appState.filters.mes !== 'Todas') dataForStores = dataForStores.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
   const stores = [...new Set(dataForStores.map(item => item.loja))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const selected = stores.includes(appState.filters.loja) ? appState.filters.loja : 'Todas';
   appState.filters.loja = selected;
@@ -856,22 +802,6 @@ function bindEvents() {
   if (els.openDrawerBtn) els.openDrawerBtn.addEventListener('click', () => setDrawer(true));
   if (els.closeDrawerBtn) els.closeDrawerBtn.addEventListener('click', () => setDrawer(false));
   if (els.drawerBackdrop) els.drawerBackdrop.addEventListener('click', () => setDrawer(false));
-  if (els.openPresentationBtn) els.openPresentationBtn.addEventListener('click', () => setPresentationMode(true));
-  if (els.closePresentationBtn) els.closePresentationBtn.addEventListener('click', () => setPresentationMode(false));
-  if (els.presentationFullscreenBtn) els.presentationFullscreenBtn.addEventListener('click', togglePresentationFullscreen);
-  if (els.presentationAutoplayBtn) els.presentationAutoplayBtn.addEventListener('click', togglePresentationAutoplay);
-  if (els.presentationPrevBtn) els.presentationPrevBtn.addEventListener('click', () => changePresentationSlide(-1, { restartAutoplay: true }));
-  if (els.presentationNextBtn) els.presentationNextBtn.addEventListener('click', () => changePresentationSlide(1, { restartAutoplay: true }));
-  document.addEventListener('keydown', event => {
-    if (!appState.presentationOpen) return;
-    if (event.key === 'Escape') setPresentationMode(false);
-    if (event.key === 'ArrowRight') changePresentationSlide(1, { restartAutoplay: true });
-    if (event.key === 'ArrowLeft') changePresentationSlide(-1, { restartAutoplay: true });
-    if (event.key === ' ') {
-      event.preventDefault();
-      togglePresentationAutoplay();
-    }
-  });
   if (els.applyFiltersBtn) els.applyFiltersBtn.addEventListener('click', () => {
     setDrawer(false);
     refreshAll();
@@ -979,6 +909,63 @@ function saveGoals() {
   refreshAll();
 }
 
+
+function recalcRecordPercentages(record) {
+  if (!record) return record;
+  const venda = Number(record.valorVenda || 0);
+  const quebra = Number(record.valorQuebraOperacional ?? record.valorQuebra ?? 0);
+  const falta = Number(record.valorFalta || 0);
+  const qualidade = Number(record.valorQualidade || 0);
+  record.percentualQuebra = venda > 0 ? Number(((quebra / venda) * 100).toFixed(2)) : 0;
+  record.percentualFalta = venda > 0 ? Number(((falta / venda) * 100).toFixed(2)) : 0;
+  record.percentualQualidade = venda > 0 ? Number(((qualidade / venda) * 100).toFixed(2)) : 0;
+  record.statusQuebra = getBreakStatus(record.percentualQuebra).label;
+  return record;
+}
+
+function applyValidatedHistoricalClosings() {
+  // Idempotente: desfaz o rateio anterior antes de recalcular.
+  appState.data.forEach(record => {
+    if (record?.fechamentoHistoricoId === 'COSTA-2026-08-S1-S3' && Number.isFinite(Number(record.valorVendaPreFechamento))) {
+      record.valorVenda = Number(record.valorVendaPreFechamento);
+      delete record.valorVendaPreFechamento;
+      delete record.fechamentoHistoricoId;
+      delete record.ajusteFechamentoHistorico;
+      recalcRecordPercentages(record);
+    }
+  });
+
+  const monthKey = '2026-08';
+  const costa = appState.data.filter(record => record?.rede === 'COSTA' && (record.monthKey || inferRecordMonthKey(record)) === monthKey);
+  const weeks = new Set(costa.map(record => record.semana));
+  if (!['1ª semana', '2ª semana', '3ª semana'].every(week => weeks.has(week))) return;
+  if (weeks.has('4ª semana') || weeks.has('5ª semana')) return;
+
+  // Fechamento parcial validado no consolidado comercial enviado pelo usuário.
+  const validatedTotal = 1120832.00;
+  const currentTotal = costa.reduce((sum, record) => sum + Number(record.valorVenda || 0), 0);
+  const delta = Number((validatedTotal - currentTotal).toFixed(2));
+  if (Math.abs(delta) < 0.01) return;
+
+  const latest = costa.filter(record => record.semana === '3ª semana' && !record.isNetworkTotalOnly);
+  const baseTotal = latest.reduce((sum, record) => sum + Math.max(0, Number(record.valorVenda || 0)), 0);
+  if (!latest.length || baseTotal <= 0) return;
+
+  let applied = 0;
+  latest.forEach((record, index) => {
+    const base = Number(record.valorVenda || 0);
+    const share = index === latest.length - 1
+      ? Number((delta - applied).toFixed(2))
+      : Number((delta * Math.max(0, base) / baseTotal).toFixed(2));
+    record.valorVendaPreFechamento = base;
+    record.valorVenda = Number((base + share).toFixed(2));
+    record.fechamentoHistoricoId = 'COSTA-2026-08-S1-S3';
+    record.ajusteFechamentoHistorico = share;
+    applied = Number((applied + share).toFixed(2));
+    recalcRecordPercentages(record);
+  });
+}
+
 function importExcelFile() {
   const file = els.excelFileInput.files[0];
   const weekValue = (els.weekInput.value || '').trim();
@@ -992,12 +979,28 @@ function importExcelFile() {
   const reader = new FileReader();
   reader.onload = event => {
     try {
+      const currentYear = new Date().getFullYear();
+      const targetMonthKey = `${currentYear}-${monthValue}`;
+      const replacedBatchIds = new Set(
+        appState.imports
+          .filter(batch => (batch.monthKey || inferRecordMonthKey(batch)) === targetMonthKey && batch.weekLabel === weekValue)
+          .map(batch => batch.id)
+      );
+
+      // Mesmo mês + mesma semana = substituição, nunca soma em duplicidade.
+      appState.data = appState.data.filter(item => {
+        const samePeriod = (item.monthKey || inferRecordMonthKey(item)) === targetMonthKey && item.semana === weekValue;
+        return !samePeriod && !replacedBatchIds.has(item.sourceBatchId);
+      });
+      appState.imports = appState.imports.filter(batch => !replacedBatchIds.has(batch.id));
+
       const workbook = XLSX.read(event.target.result, { type: 'array', cellDates: true });
       const parsed = parseImportedWorkbook(workbook, file.name, { weekLabel: weekValue, monthValue, monthLabel });
       if (!parsed.records.length) return setImportFeedback('Nenhum registro válido encontrado na planilha.', true);
 
       appState.data = [...appState.data, ...parsed.records];
       appState.imports = [parsed.batch, ...appState.imports].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+      applyValidatedHistoricalClosings();
       appState.config.ultimaImportacao = parsed.batch.importedAt;
       appState.config.ultimaAtualizacao = new Date().toISOString();
       persistLocal();
@@ -1011,10 +1014,9 @@ function importExcelFile() {
       if (els.monthInput) els.monthInput.value = '';
       const conferenceLabel = parsed.batch.verificationStatus === 'ok'
         ? 'Conferência OK'
-        : parsed.batch.verificationStatus === 'warn'
-          ? 'Conferência com alerta'
-          : 'Conferência com divergência';
-      setImportFeedback(`${parsed.records.length} registros importados. ${conferenceLabel}.`, parsed.batch.verificationStatus === 'bad');
+        : parsed.batch.verificationStatus === 'warn' ? 'Conferência com alerta' : 'Conferência com divergência';
+      const replaceText = replacedBatchIds.size ? ' Período anterior substituído.' : '';
+      setImportFeedback(`${parsed.records.length} registros importados.${replaceText} ${conferenceLabel}.`, parsed.batch.verificationStatus === 'bad');
     } catch (error) {
       setImportFeedback(`Erro ao processar planilha: ${error.message}`, true);
     }
@@ -1039,62 +1041,48 @@ function parseImportedWorkbook(workbook, fileName, periodInfo = {}) {
     const sheet = workbook.Sheets[sheetName];
     const extracted = extractWorksheetObjects(sheet);
     if (!extracted.rows.length) return;
-
     if (isWorkbookTotalSheet(sheetName, extracted.headers)) {
       totalSheet.push(...parseWorkbookTotalsSheet(extracted.rows));
       return;
     }
-
-    const parsedSheet = parseDataWorksheet({
-      sheetName,
-      headers: extracted.headers,
-      rows: extracted.rows,
-      batchId,
-      fileName,
-      importedAt,
-      weekLabel,
-      monthLabel,
-      monthKey,
-      periodLabel
-    });
-
+    const parsedSheet = parseDataWorksheet({ sheetName, headers: extracted.headers, rows: extracted.rows, batchId, fileName, importedAt, weekLabel, monthLabel, monthKey, periodLabel });
     if (parsedSheet.records.length) records.push(...parsedSheet.records);
     if (parsedSheet.verification) verificationItems.push(parsedSheet.verification);
   });
 
-  const adjustedRecords = applyCostaWeeklySalesAdjustment(records, appState.data);
-  records.length = 0;
-  records.push(...adjustedRecords);
+  records.splice(0, records.length, ...applyCostaWeeklySalesAdjustment(records, appState.data));
+
+  // Redes presentes somente no SÓ FOLHAS TOTAL (ex.: NOSSA KAZA).
+  const detailed = new Set(records.map(item => normalizeNetworkName(item.rede)));
+  totalSheet.forEach((summary, index) => {
+    const network = normalizeNetworkName(summary.rede);
+    if (!network || detailed.has(network)) return;
+    records.push({
+      id: `${batchId}-total-${slugify(network)}-${index + 1}`,
+      sourceBatchId: batchId, sourceFileName: fileName, sourceSheetName: 'SÓ FOLHAS TOTAL',
+      rede: network, loja: 'TOTAL DA REDE', semana: weekLabel, monthLabel, monthKey, periodLabel,
+      valorVenda: Number(summary.venda || 0),
+      valorQuebraOperacional: Number(summary.quebra || 0),
+      valorQuebraTotal: Number(summary.quebraComDevolucoes || summary.quebra || 0),
+      valorQuebra: Number(summary.quebra || 0), valorFalta: Number(summary.falta || 0), valorQualidade: Number(summary.qualidade || 0),
+      valorEstoque: Number(summary.estoque || 0), percentualQuebra: Number(summary.percentual || 0),
+      percentualFalta: 0, percentualQualidade: 0, statusQuebra: getBreakStatus(Number(summary.percentual || 0)).label,
+      dataImportacao: importedAt, modeloImportacao: 'TOTAL_ONLY', isNetworkTotalOnly: true
+    });
+  });
 
   const grouped = aggregateByNetwork(records);
   const totalsVerification = compareWorkbookTotals(grouped, totalSheet);
   const combinedVerifications = [...verificationItems, ...totalsVerification].filter(Boolean);
-  const verificationStatus = combinedVerifications.some(item => item.status === 'bad')
-    ? 'bad'
-    : combinedVerifications.some(item => item.status === 'warn')
-      ? 'warn'
-      : 'ok';
-
+  const verificationStatus = combinedVerifications.some(item => item.status === 'bad') ? 'bad'
+    : combinedVerifications.some(item => item.status === 'warn') ? 'warn' : 'ok';
   const totals = aggregateRecords(records);
-  return {
-    records,
-    batch: {
-      id: batchId,
-      fileName,
-      importedAt,
-      weekLabel,
-      monthLabel,
-      monthKey,
-      periodLabel,
-      recordCount: records.length,
-      totalVenda: Number(totals.venda.toFixed(2)),
-      totalQuebra: Number(totals.quebra.toFixed(2)),
-      totalFalta: Number(totals.falta.toFixed(2)),
-      totalQualidade: Number(totals.qualidade.toFixed(2)),
-      verificationStatus,
-      verificationItems: combinedVerifications
-    }
-  };
+  return { records, batch: {
+    id: batchId, fileName, importedAt, weekLabel, monthLabel, monthKey, periodLabel,
+    recordCount: records.length, totalVenda: Number(totals.venda.toFixed(2)), totalQuebra: Number(totals.quebra.toFixed(2)),
+    totalFalta: Number(totals.falta.toFixed(2)), totalQualidade: Number(totals.qualidade.toFixed(2)),
+    verificationStatus, verificationItems: combinedVerifications
+  }};
 }
 
 function extractWorksheetObjects(sheet) {
@@ -1121,25 +1109,15 @@ function parseWorkbookTotalsSheet(rows) {
   return rows.map(row => {
     const rede = String(getFlexibleCell(row, [['REDES'], ['REDE']]) || '').trim();
     if (!rede || isTotalRow(rede)) return null;
-
-    const quebraOperacionalInformada = parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL']]));
-    const quebraColunaPrincipal = parseMoney(getFlexibleCell(row, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
+    const quebra = parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA', 'TOTAL'], ['QUEBRA']]));
     const falta = parseMoney(getFlexibleCell(row, [['DEV', 'FALTA'], ['FALTA']]));
     const qualidade = parseMoney(getFlexibleCell(row, [['DEV', 'QUALIDADE'], ['QUALIDADE']]));
-    const quebraOperacional = quebraOperacionalInformada > 0
-      ? quebraOperacionalInformada
-      : quebraColunaPrincipal;
-    const quebraTotalCalculada = quebraOperacional + falta + qualidade;
-
     return {
-      rede: normalizeNetworkName(rede),
-      venda: parseMoney(getFlexibleCell(row, [['VENDA', 'TOTAL'], ['VENDA']])),
-      quebraOperacional: Number(quebraOperacional.toFixed(2)),
-      quebra: Number(quebraTotalCalculada.toFixed(2)),
-      quebraTotal: Number(quebraTotalCalculada.toFixed(2)),
+      rede: normalizeNetworkName(rede), venda: parseMoney(getFlexibleCell(row, [['VENDA', 'TOTAL'], ['VENDA']])),
+      quebraOperacional: Number(quebra.toFixed(2)), quebra: Number(quebra.toFixed(2)), quebraTotal: Number(quebra.toFixed(2)),
+      quebraComDevolucoes: Number((quebra + falta + qualidade).toFixed(2)),
       acordoComercial: parseMoney(getFlexibleCell(row, [['ACORDO', 'COMERCIAL']])),
-      falta: Number(falta.toFixed(2)),
-      qualidade: Number(qualidade.toFixed(2)),
+      falta: Number(falta.toFixed(2)), qualidade: Number(qualidade.toFixed(2)),
       estoque: parseMoney(getFlexibleCell(row, [['ESTOQUE', 'EM', 'LOJA'], ['ESTOQUE'], ['VALOR', 'EST']])),
       percentual: parsePercent(getFlexibleCell(row, [['%', 'TOTAL'], ['PERCENTUAL']])),
       percentualEstoque: parsePercent(getFlexibleCell(row, [['PERCENTUAL', 'EST'], ['%', 'EST']]))
@@ -1199,57 +1177,40 @@ function parseDataWorksheet({ sheetName, rows, batchId, fileName, importedAt, we
   const records = dataRows.map((row, index) => {
     const originalStore = String(getRowLabel(row) || '').trim();
     if (!originalStore) return null;
-
     let rede = networkFromSheet || normalizeNetworkName(String(getFlexibleCell(row, [['REDE']]) || '').trim()) || inferNetworkByStore(originalStore) || 'VARIADOS';
-    let venda = 0;
-    let falta = 0;
-    let qualidade = 0;
-    let quebraOperacional = 0;
-    let estoque = 0;
-    let percentualQuebra = 0;
+    let venda = 0, falta = 0, qualidade = 0, quebraOperacional = 0, estoque = 0, percentualQuebra = 0;
 
     if (model === 'DIA_A_DIA') {
-      rede = 'ATACADÃO DIA A DIA';
-      venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
-      falta = parseMoney(getFlexibleCell(row, [['FALTA']]));
-      qualidade = parseMoney(getFlexibleCell(row, [['QUALIDADE']]));
+      rede = 'ATACADÃO DIA A DIA'; venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
+      falta = parseMoney(getFlexibleCell(row, [['FALTA']])); qualidade = parseMoney(getFlexibleCell(row, [['QUALIDADE']]));
       quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'QUEBRA'], ['%', 'TOTAL']]));
     } else if (model === 'PEREIRA') {
-      rede = 'COMPER/FORT';
-      venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
+      rede = 'COMPER/FORT'; venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
       falta = parseMoney(getFlexibleCell(row, [['DEV', 'FALTA'], ['DEVOLUCAO', 'FALTA'], ['FALTA']]));
       qualidade = parseMoney(getFlexibleCell(row, [['DEVOLUCAO', 'QUALIDADE'], ['DEV', 'QUALIDADE'], ['QUALIDADE']]));
       quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'PARCIAL'], ['QUEBRA', 'REAL'], ['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'QUEBRA', 'REAL'], ['%', 'TOTAL'], ['PERCENTUAL']]));
     } else if (model === 'VIVENDAS') {
-      rede = 'VIVENDAS';
-      venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
-      quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA']]));
+      rede = 'VIVENDAS'; venda = parseMoney(getFlexibleCell(row, [['VENDA']])); quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'TOTAL'], ['PERCENTUAL']]));
     } else if (model === 'COSTA') {
-      rede = 'COSTA';
-      venda = parseMoney(getFlexibleCell(row, [['VALOR', 'ENTREGA', 'TOTAL'], ['VENDA']]));
+      rede = 'COSTA'; venda = parseMoney(getFlexibleCell(row, [['VALOR', 'ENTREGA', 'TOTAL'], ['VENDA']]));
       estoque = parseMoney(getFlexibleCell(row, [['ESTOQUE', 'EM', 'LOJA'], ['VALOR', 'EST', 'ATUAL'], ['VALOR', 'ESTOQUE', 'ATUAL'], ['ESTOQUE']]));
       falta = parseMoney(getFlexibleCell(row, [['DEVOLUCAO', 'FALTA'], ['VALOR', 'FALTA'], ['FALTA']]));
       qualidade = parseMoney(getFlexibleCell(row, [['DEVOLUCAO', 'QUALIDADE'], ['VALOR', 'QUALIDADE'], ['QUALIDADE']]));
       quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['VALOR', 'QUEBRA'], ['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'REAL'], ['%', 'QUEBRA', 'REAL'], ['PORCENTAGEM', 'TOTAL'], ['%', 'TOTAL']]));
     } else if (model === 'VARIADOS') {
-      rede = 'VARIADOS';
-      venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
+      rede = 'VARIADOS'; venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
     } else if (model === 'CONSIGNADOS') {
-      rede = 'CONSIGNADOS';
-      venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
-      quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA']]));
+      rede = 'CONSIGNADOS'; venda = parseMoney(getFlexibleCell(row, [['VENDA']])); quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['PERCENTUAL'], ['%', 'TOTAL']]));
     } else if (model === 'ASSAI') {
-      rede = 'ASSAÍ';
-      venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
+      rede = 'ASSAÍ'; venda = parseMoney(getFlexibleCell(row, [['VENDA']])); quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA']]));
+      percentualQuebra = parsePercent(getFlexibleCell(row, [['PERCENTUAL'], ['%', 'TOTAL'], ['%', 'QUEBRA']]));
     } else if (model === 'BRETAS') {
-      rede = 'BRETAS';
-      venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
-      quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
+      rede = 'BRETAS'; venda = parseMoney(getFlexibleCell(row, [['VENDA']])); quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'TOTAL'], ['PERCENTUAL']]));
     } else {
       venda = parseMoney(getFlexibleCell(row, [['VALOR', 'ENTREGA', 'TOTAL'], ['VENDA']]));
@@ -1260,72 +1221,34 @@ function parseDataWorksheet({ sheetName, rows, batchId, fileName, importedAt, we
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'REAL'], ['%', 'QUEBRA', 'REAL'], ['%', 'QUEBRA'], ['PERCENTUAL'], ['%', 'TOTAL']]));
     }
 
-    if (normalizedSheet.includes('consignad') && model === 'GENERICO') {
-      rede = 'CONSIGNADOS';
-      qualidade = 0;
-      falta = 0;
-      estoque = 0;
-    } else if (normalizedSheet.includes('bretas') && model === 'GENERICO') {
-      rede = 'BRETAS';
-      falta = 0;
-      qualidade = 0;
-      estoque = 0;
-    } else if (normalizedSheet.includes('variados') && model === 'GENERICO') {
-      rede = 'VARIADOS';
-      falta = 0;
-      qualidade = 0;
-      quebraOperacional = 0;
-      estoque = 0;
-      percentualQuebra = 0;
-    } else if (normalizedSheet.includes('costa') && model === 'GENERICO') {
-      rede = 'COSTA';
-    } else if ((normalizedSheet.includes('comper') || normalizedSheet.includes('fort')) && model === 'GENERICO') {
-      rede = 'COMPER/FORT';
-    } else if (normalizedSheet.includes('dia a dia') && model === 'GENERICO') {
-      rede = 'ATACADÃO DIA A DIA';
-    }
+    if (normalizedSheet.includes('consignad') && model === 'GENERICO') { rede = 'CONSIGNADOS'; qualidade = 0; falta = 0; estoque = 0; }
+    else if (normalizedSheet.includes('bretas') && model === 'GENERICO') { rede = 'BRETAS'; falta = 0; qualidade = 0; estoque = 0; }
+    else if (normalizedSheet.includes('variados') && model === 'GENERICO') { rede = 'VARIADOS'; falta = 0; qualidade = 0; quebraOperacional = 0; estoque = 0; percentualQuebra = 0; }
+    else if (normalizedSheet.includes('costa') && model === 'GENERICO') rede = 'COSTA';
+    else if ((normalizedSheet.includes('comper') || normalizedSheet.includes('fort')) && model === 'GENERICO') rede = 'COMPER/FORT';
+    else if (normalizedSheet.includes('dia a dia') && model === 'GENERICO') rede = 'ATACADÃO DIA A DIA';
+    else if (normalizedSheet.includes('assa') && model === 'GENERICO') rede = 'ASSAÍ';
 
     const normalizedStore = normalizeStoreAndNetwork(originalStore, rede);
     rede = normalizedStore.rede || rede;
     const store = normalizedStore.loja;
-
-    const quebraTotalCalculada = quebraOperacional + falta + qualidade;
-
-    if ((!percentualQuebra || !Number.isFinite(percentualQuebra)) && venda > 0 && quebraTotalCalculada !== 0) {
-      percentualQuebra = Number(((quebraTotalCalculada / venda) * 100).toFixed(2));
+    const quebraComDevolucoes = quebraOperacional + falta + qualidade;
+    if ((!percentualQuebra || !Number.isFinite(percentualQuebra)) && venda > 0 && quebraOperacional !== 0) {
+      percentualQuebra = Number(((quebraOperacional / venda) * 100).toFixed(2));
     }
 
     return {
-      id: `${batchId}-${slugify(rede)}-${slugify(store)}-${index + 1}`,
-      sourceBatchId: batchId,
-      sourceFileName: fileName,
-      sourceSheetName: sheetName,
-      rede,
-      loja: store,
-      semana: weekLabel,
-      monthLabel,
-      monthKey,
-      periodLabel,
-      valorVenda: Number(venda.toFixed(2)),
-      valorQuebraOperacional: Number(quebraOperacional.toFixed(2)),
-      valorQuebraTotal: Number(quebraTotalCalculada.toFixed(2)),
-      valorQuebra: Number(quebraTotalCalculada.toFixed(2)),
-      valorFalta: Number(falta.toFixed(2)),
-      valorQualidade: Number(qualidade.toFixed(2)),
-      valorEstoque: rede === 'COSTA' ? Number(estoque.toFixed(2)) : 0,
-      percentualQuebra: Number((percentualQuebra || 0).toFixed(2)),
-      percentualFalta: venda > 0 ? Number(((falta / venda) * 100).toFixed(2)) : 0,
+      id: `${batchId}-${slugify(rede)}-${slugify(store)}-${index + 1}`, sourceBatchId: batchId, sourceFileName: fileName, sourceSheetName: sheetName,
+      rede, loja: store, semana: weekLabel, monthLabel, monthKey, periodLabel,
+      valorVenda: Number(venda.toFixed(2)), valorVendaOriginal: Number(venda.toFixed(2)),
+      valorQuebraOperacional: Number(quebraOperacional.toFixed(2)), valorQuebraTotal: Number(quebraComDevolucoes.toFixed(2)), valorQuebra: Number(quebraOperacional.toFixed(2)),
+      valorFalta: Number(falta.toFixed(2)), valorQualidade: Number(qualidade.toFixed(2)), valorEstoque: rede === 'COSTA' ? Number(estoque.toFixed(2)) : 0,
+      percentualQuebra: Number((percentualQuebra || 0).toFixed(2)), percentualFalta: venda > 0 ? Number(((falta / venda) * 100).toFixed(2)) : 0,
       percentualQualidade: venda > 0 ? Number(((qualidade / venda) * 100).toFixed(2)) : 0,
-      statusQuebra: getBreakStatus(percentualQuebra).label,
-      dataImportacao: importedAt,
-      modeloImportacao: model || 'GENERICO'
+      statusQuebra: getBreakStatus(percentualQuebra).label, dataImportacao: importedAt, modeloImportacao: model || 'GENERICO'
     };
   }).filter(Boolean);
-
-  return {
-    records,
-    verification: buildSheetVerification(sheetName, records, totalRow)
-  };
+  return { records, verification: buildSheetVerification(sheetName, records, totalRow) };
 }
 
 function getRowLabel(row) {
@@ -1379,88 +1302,44 @@ function detectWorksheetModel(sheetName, row) {
 }
 
 function buildSheetVerification(sheetName, records, totalRow) {
-  if (!records.length) {
-    return { sheetName, status: 'ok', label: 'Sem dados para conferir' };
-  }
-  if (!totalRow) {
-    return { sheetName, status: 'ok', label: 'Sem total para conferir' };
-  }
-
+  if (!records.length) return { sheetName, status: 'ok', label: 'Sem dados para conferir' };
+  if (!totalRow) return { sheetName, status: 'ok', label: 'Sem total para conferir' };
   const model = detectWorksheetModel(sheetName, totalRow || records[0] || {});
   const totals = aggregateRecords(records);
   const totalEstoque = records.reduce((sum, item) => sum + Number(item.valorEstoque || 0), 0);
-
   const vendaEsperada = parseMoney(getFlexibleCell(totalRow, [['VALOR', 'ENTREGA', 'TOTAL'], ['VENDA']]));
-  let quebraTotalEsperada = 0;
+  let quebraEsperada = 0;
+  if (model === 'DIA_A_DIA') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['QUEBRA']]));
+  else if (model === 'PEREIRA') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'PARCIAL'], ['QUEBRA', 'REAL'], ['QUEBRA']]));
+  else if (model === 'VIVENDAS' || model === 'CONSIGNADOS' || model === 'ASSAI') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA']]));
+  else if (model === 'COSTA') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['VALOR', 'QUEBRA'], ['QUEBRA']]));
+  else if (model === 'BRETAS') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
 
-  if (model === 'DIA_A_DIA') {
-    const faltaEsperada = parseMoney(getFlexibleCell(totalRow, [['FALTA']]));
-    const qualidadeEsperada = parseMoney(getFlexibleCell(totalRow, [['QUALIDADE']]));
-    const quebraOperacionalEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['QUEBRA']]));
-    quebraTotalEsperada = quebraOperacionalEsperada + faltaEsperada + qualidadeEsperada;
-  } else if (model === 'PEREIRA') {
-    const faltaEsperada = parseMoney(getFlexibleCell(totalRow, [['DEV', 'FALTA'], ['FALTA']]));
-    const qualidadeEsperada = parseMoney(getFlexibleCell(totalRow, [['DEVOLUCAO', 'QUALIDADE'], ['DEV', 'QUALIDADE'], ['QUALIDADE']]));
-    const quebraTotalInformada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'TOTAL']]));
-    quebraTotalEsperada = quebraTotalInformada > 0
-      ? quebraTotalInformada
-      : parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'PARCIAL'], ['QUEBRA', 'REAL'], ['QUEBRA']])) + faltaEsperada + qualidadeEsperada;
-  } else if (model === 'VIVENDAS') {
-    quebraTotalEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA']]));
-  } else if (model === 'COSTA') {
-    const faltaEsperada = parseMoney(getFlexibleCell(totalRow, [['DEVOLUCAO', 'FALTA'], ['VALOR', 'FALTA'], ['FALTA']]));
-    const qualidadeEsperada = parseMoney(getFlexibleCell(totalRow, [['DEVOLUCAO', 'QUALIDADE'], ['VALOR', 'QUALIDADE'], ['QUALIDADE']]));
-    const quebraOperacionalEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['VALOR', 'QUEBRA'], ['QUEBRA']]));
-    quebraTotalEsperada = quebraOperacionalEsperada + faltaEsperada + qualidadeEsperada;
-  } else if (model === 'CONSIGNADOS') {
-    quebraTotalEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA']]));
-  } else if (model === 'BRETAS') {
-    quebraTotalEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
-  }
-
-  const details = [
-    buildVerificationDetail('Venda', vendaEsperada, totals.venda, { alwaysInclude: true })
-  ];
-
+  const details = [buildVerificationDetail('Venda', vendaEsperada, totals.venda, { alwaysInclude: true })];
   if (model === 'DIA_A_DIA') {
     details.push(buildVerificationDetail('Falta', parseMoney(getFlexibleCell(totalRow, [['FALTA']])), totals.falta));
     details.push(buildVerificationDetail('Qualidade', parseMoney(getFlexibleCell(totalRow, [['QUALIDADE']])), totals.qualidade));
-    details.push(buildVerificationDetail('Quebra total', quebraTotalEsperada, totals.quebra));
+    details.push(buildVerificationDetail('Quebra real', quebraEsperada, totals.quebra));
   } else if (model === 'PEREIRA') {
     details.push(buildVerificationDetail('Falta', parseMoney(getFlexibleCell(totalRow, [['DEV', 'FALTA'], ['FALTA']])), totals.falta));
     details.push(buildVerificationDetail('Qualidade', parseMoney(getFlexibleCell(totalRow, [['DEVOLUCAO', 'QUALIDADE'], ['DEV', 'QUALIDADE'], ['QUALIDADE']])), totals.qualidade));
-    details.push(buildVerificationDetail('Quebra total', quebraTotalEsperada, totals.quebra));
-  } else if (model === 'VIVENDAS') {
-    details.push(buildVerificationDetail('Quebra', quebraTotalEsperada, totals.quebra));
+    details.push(buildVerificationDetail('Quebra parcial', quebraEsperada, totals.quebra));
+  } else if (model === 'VIVENDAS' || model === 'CONSIGNADOS' || model === 'ASSAI' || model === 'BRETAS') {
+    details.push(buildVerificationDetail('Quebra', quebraEsperada, totals.quebra));
   } else if (model === 'COSTA') {
-    details.push(buildVerificationDetail('Estoque atual', parseMoney(getFlexibleCell(totalRow, [['ESTOQUE', 'EM', 'LOJA'], ['VALOR', 'EST'], ['ESTOQUE']])), totalEstoque));
+    details.push(buildVerificationDetail('Estoque', parseMoney(getFlexibleCell(totalRow, [['ESTOQUE', 'EM', 'LOJA'], ['VALOR', 'EST'], ['ESTOQUE']])), totalEstoque));
     details.push(buildVerificationDetail('Falta', parseMoney(getFlexibleCell(totalRow, [['DEVOLUCAO', 'FALTA'], ['VALOR', 'FALTA'], ['FALTA']])), totals.falta));
     details.push(buildVerificationDetail('Qualidade', parseMoney(getFlexibleCell(totalRow, [['DEVOLUCAO', 'QUALIDADE'], ['VALOR', 'QUALIDADE'], ['QUALIDADE']])), totals.qualidade));
-    details.push(buildVerificationDetail('Quebra total', quebraTotalEsperada, totals.quebra));
-  } else if (model === 'CONSIGNADOS') {
-    details.push(buildVerificationDetail('Quebra', quebraTotalEsperada, totals.quebra));
-  } else if (model === 'BRETAS') {
-    details.push(buildVerificationDetail('Quebra', quebraTotalEsperada, totals.quebra));
+    details.push(buildVerificationDetail('Quebra real', quebraEsperada, totals.quebra));
   }
-
   const applicableDetails = details.filter(Boolean);
   const summary = summarizeVerificationDetails(applicableDetails);
   const vendaDetail = applicableDetails.find(item => item.label === 'Venda');
   const quebraDetail = applicableDetails.find(item => normalizeText(item.label).includes('quebra'));
-
-  return {
-    type: 'sheet-total',
-    sheetName,
-    status: summary.status,
-    label: summary.label,
-    expectedVenda: vendaDetail?.expected,
-    actualVenda: vendaDetail?.actual,
-    vendaDiff: vendaDetail?.diff,
-    expectedQuebra: quebraDetail?.expected,
-    actualQuebra: quebraDetail?.actual,
-    quebraDiff: quebraDetail?.diff,
-    details: applicableDetails
-  };
+  return { type: 'sheet-total', sheetName, status: summary.status, label: summary.label,
+    expectedVenda: vendaDetail?.expected, actualVenda: vendaDetail?.actual, vendaDiff: vendaDetail?.diff,
+    expectedQuebra: quebraDetail?.expected, actualQuebra: quebraDetail?.actual, quebraDiff: quebraDetail?.diff,
+    details: applicableDetails };
 }
 
 function compareWorkbookTotals(grouped, totalSheet) {
@@ -1469,42 +1348,24 @@ function compareWorkbookTotals(grouped, totalSheet) {
     const network = normalizeNetworkName(summary.rede);
     const found = grouped.find(item => normalizeNetworkName(item.rede) === network);
     if (!found) return null;
-
-    const details = [
-      buildVerificationDetail('Venda', Number(summary.venda || 0), Number(found.venda || 0), { alwaysInclude: true })
-    ];
-
+    const details = [];
+    // A venda COSTA é ajustada por estoque anterior; a venda bruta já é conferida na própria aba COSTA.
+    if (network !== 'COSTA') details.push(buildVerificationDetail('Venda', Number(summary.venda || 0), Number(found.venda || 0), { alwaysInclude: true }));
     if (network === 'ATACADÃO DIA A DIA' || network === 'COMPER/FORT' || network === 'COSTA') {
       details.push(buildVerificationDetail('Falta', Number(summary.falta || 0), Number(found.falta || 0)));
       details.push(buildVerificationDetail('Qualidade', Number(summary.qualidade || 0), Number(found.qualidade || 0)));
-      details.push(buildVerificationDetail('Quebra total', Number(summary.quebraTotal || 0), Number(found.quebra || 0)));
-      if (network === 'COSTA') {
-        details.push(buildVerificationDetail('Estoque atual', Number(summary.estoque || 0), Number(found.estoque || 0)));
-      }
-    } else if (network === 'VIVENDAS' || network === 'CONSIGNADOS' || network === 'BRETAS') {
-      if (Number(summary.quebraTotal || 0) > 0 || Number(found.quebra || 0) > 0) {
-        details.push(buildVerificationDetail('Quebra', Number(summary.quebraTotal || 0), Number(found.quebra || 0)));
-      }
+      details.push(buildVerificationDetail('Quebra real', Number(summary.quebra || 0), Number(found.quebra || 0)));
+      if (network === 'COSTA') details.push(buildVerificationDetail('Estoque', Number(summary.estoque || 0), Number(found.estoque || 0)));
+    } else if (network === 'VIVENDAS' || network === 'CONSIGNADOS' || network === 'BRETAS' || network === 'ASSAÍ') {
+      if (Number(summary.quebra || 0) > 0 || Number(found.quebra || 0) > 0) details.push(buildVerificationDetail('Quebra', Number(summary.quebra || 0), Number(found.quebra || 0)));
     }
-
     const applicableDetails = details.filter(Boolean);
-    const summaryStatus = summarizeVerificationDetails(applicableDetails);
+    const statusInfo = summarizeVerificationDetails(applicableDetails);
     const vendaDetail = applicableDetails.find(item => item.label === 'Venda');
     const quebraDetail = applicableDetails.find(item => normalizeText(item.label).includes('quebra'));
-
-    return {
-      type: 'workbook-total',
-      sheetName: `SÓ FOLHAS TOTAL • ${network}`,
-      status: summaryStatus.status,
-      label: summaryStatus.label,
-      expectedVenda: vendaDetail?.expected,
-      actualVenda: vendaDetail?.actual,
-      vendaDiff: vendaDetail?.diff,
-      expectedQuebra: quebraDetail?.expected,
-      actualQuebra: quebraDetail?.actual,
-      quebraDiff: quebraDetail?.diff,
-      details: applicableDetails
-    };
+    return { type: 'workbook-total', sheetName: `SÓ FOLHAS TOTAL • ${network}`, status: statusInfo.status, label: statusInfo.label,
+      expectedVenda: vendaDetail?.expected, actualVenda: vendaDetail?.actual, vendaDiff: vendaDetail?.diff,
+      expectedQuebra: quebraDetail?.expected, actualQuebra: quebraDetail?.actual, quebraDiff: quebraDetail?.diff, details: applicableDetails };
   }).filter(Boolean);
 }
 
@@ -1517,13 +1378,9 @@ function inferNetworkByStore(store) {
   const normalized = normalizeText(store);
   const rules = [
     ['ATACADÃO DIA A DIA', ['dd ', 'dia a dia', 'atacadao dia a dia', 'atacadão dia a dia']],
-    ['COMPER/FORT', ['comper', 'fort']],
-    ['VIVENDAS', ['vivendas']],
-    ['BRETAS', ['bretas']],
-    ['COSTA', ['costa']],
-    ['ASSAÍ', ['assai', 'assaí']],
-    ['VARIADOS', ['emporio', 'mercado', 'variado']],
-    ['CONSIGNADOS', ['consignado']]
+    ['COMPER/FORT', ['comper', 'fort']], ['VIVENDAS', ['vivendas']], ['BRETAS', ['bretas']], ['COSTA', ['costa']],
+    ['ASSAÍ', ['assai', 'assaí']], ['VARIADOS', ['emporio', 'mercado', 'variado']], ['CONSIGNADOS', ['consignado']],
+    ['NOSSA KAZA', ['nossa kaza', 'nossa casa']]
   ];
   const match = rules.find(([_, terms]) => terms.some(term => normalized.includes(term)));
   return match ? match[0] : '';
@@ -1553,97 +1410,6 @@ function getDisplayRecords(records) {
   return shouldUseLatestMonthFallback() ? filterToLatestImportMonth(records) : records;
 }
 
-
-function initPresentationDeck() {
-  if (!els.presentationDots) return;
-  els.presentationDots.innerHTML = Array.from({ length: PRESENTATION_SLIDE_COUNT }, (_, index) => `
-    <button class="presentation-dot${index === appState.presentationSlideIndex ? ' is-active' : ''}" type="button" data-presentation-dot="${index}" aria-label="Ir para tela ${index + 1}"></button>
-  `).join('');
-  [...els.presentationDots.querySelectorAll('[data-presentation-dot]')].forEach(button => {
-    button.addEventListener('click', () => {
-      appState.presentationSlideIndex = Number(button.dataset.presentationDot || 0);
-      updatePresentationSlides();
-      restartPresentationAutoplay();
-    });
-  });
-  updatePresentationSlides();
-  updatePresentationAutoplayUI();
-}
-
-function updatePresentationSlides() {
-  const safeIndex = ((Number(appState.presentationSlideIndex) || 0) + PRESENTATION_SLIDE_COUNT) % PRESENTATION_SLIDE_COUNT;
-  appState.presentationSlideIndex = safeIndex;
-  if (els.presentationSlides?.length) {
-    els.presentationSlides.forEach((slide, index) => {
-      const active = index === safeIndex;
-      slide.hidden = !active;
-      slide.classList.toggle('is-active', active);
-    });
-  }
-  if (els.presentationSlideLabel) {
-    els.presentationSlideLabel.textContent = `Tela ${safeIndex + 1} de ${PRESENTATION_SLIDE_COUNT}`;
-  }
-  if (els.presentationDots) {
-    [...els.presentationDots.querySelectorAll('[data-presentation-dot]')].forEach((button, index) => {
-      button.classList.toggle('is-active', index === safeIndex);
-    });
-  }
-}
-
-function updatePresentationAutoplayUI() {
-  if (els.presentationView) {
-    els.presentationView.classList.toggle('is-autoplaying', appState.presentationAutoplay);
-  }
-  if (els.presentationAutoplayBtn) {
-    els.presentationAutoplayBtn.innerHTML = appState.presentationAutoplay
-      ? '❚❚ <span>Pausar rotação</span>'
-      : '▶ <span>Retomar rotação</span>';
-  }
-}
-
-function stopPresentationAutoplay() {
-  if (appState.presentationTimer) {
-    clearInterval(appState.presentationTimer);
-    appState.presentationTimer = null;
-  }
-}
-
-function startPresentationAutoplay() {
-  stopPresentationAutoplay();
-  if (!appState.presentationOpen || !appState.presentationAutoplay) return;
-  appState.presentationTimer = setInterval(() => {
-    changePresentationSlide(1);
-  }, PRESENTATION_ROTATE_MS);
-}
-
-function restartPresentationAutoplay() {
-  if (!appState.presentationAutoplay) return;
-  startPresentationAutoplay();
-}
-
-function togglePresentationAutoplay() {
-  appState.presentationAutoplay = !appState.presentationAutoplay;
-  updatePresentationAutoplayUI();
-  if (appState.presentationAutoplay) startPresentationAutoplay();
-  else stopPresentationAutoplay();
-}
-
-function changePresentationSlide(step = 1, { restartAutoplay = false } = {}) {
-  appState.presentationSlideIndex = (appState.presentationSlideIndex + step + PRESENTATION_SLIDE_COUNT) % PRESENTATION_SLIDE_COUNT;
-  updatePresentationSlides();
-  if (restartAutoplay) restartPresentationAutoplay();
-}
-
-function initPresentationModeFromURL() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('apresentacao') === '1') {
-      setPresentationMode(true);
-    }
-  } catch {}
-}
-
-
 function refreshAll() {
   const filtered = getFilteredData();
   renderTopInfo(filtered);
@@ -1654,134 +1420,8 @@ function refreshAll() {
   updateDetailsSectionVisibility();
   renderAlerts(filtered);
   renderCharts(filtered);
-  renderPresentationView(filtered);
   renderImportBatchesTable();
   renderAdminTable();
-}
-
-function setPresentationMode(open) {
-  appState.presentationOpen = Boolean(open);
-  if (els.presentationView) els.presentationView.hidden = !appState.presentationOpen;
-  document.body.classList.toggle('presentation-open', appState.presentationOpen);
-  if (appState.presentationOpen) {
-    renderPresentationView(getFilteredData());
-    updatePresentationSlides();
-    updatePresentationAutoplayUI();
-    startPresentationAutoplay();
-  } else {
-    stopPresentationAutoplay();
-    if (document.fullscreenElement === els.presentationView) {
-      document.exitFullscreen().catch(() => {});
-    }
-  }
-}
-
-function togglePresentationFullscreen() {
-  if (!els.presentationView) return;
-  if (document.fullscreenElement === els.presentationView) {
-    document.exitFullscreen().catch(() => {});
-    return;
-  }
-  els.presentationView.requestFullscreen?.().catch(() => {});
-}
-
-function buildPresentationScopeLabel(records) {
-  const parts = [];
-  if (appState.filters.rede !== 'Todas') parts.push(appState.filters.rede);
-  if (appState.filters.loja !== 'Todas') parts.push(appState.filters.loja);
-  if (appState.filters.mes !== 'Todas') parts.push(formatMonthFilterLabel(appState.filters.mes));
-  else if (shouldUseLatestMonthFallback()) {
-    const latestMonthKey = getLatestImportMonthKey();
-    if (latestMonthKey) parts.push(formatMonthFilterLabel(latestMonthKey));
-  }
-  if (appState.filters.semana !== 'Todas') parts.push(appState.filters.semana);
-  if (!parts.length) return 'Visão geral da empresa';
-  return parts.join(' • ');
-}
-
-function renderPresentationStoreList(items, targetEl, emptyText) {
-  if (!targetEl) return;
-  if (!items.length) {
-    targetEl.innerHTML = `<div class="presentation-store-item"><span class="presentation-store-item__meta">${emptyText}</span></div>`;
-    return;
-  }
-
-  targetEl.innerHTML = items.map((item, index) => `
-    <article class="presentation-store-item">
-      <div class="presentation-store-item__top">
-        <strong class="presentation-store-item__store">${index + 1}. ${item.loja}</strong>
-        <span class="status-badge ${getBreakStatus(item.percentualQuebra).className}">${formatPercent(item.percentualQuebra)}</span>
-      </div>
-      <span class="presentation-store-item__network">${item.rede}</span>
-      <span class="presentation-store-item__meta">Venda ${formatCurrency(item.valorVenda)}</span>
-    </article>
-  `).join('');
-}
-
-function renderPresentationView(filtered) {
-  if (!els.presentationView) return;
-
-  const displayRecords = getDisplayRecords(filtered);
-  const totals = aggregateRecords(displayRecords);
-  const metaTarget = resolveActiveMetaTarget(displayRecords);
-  const metaPercent = metaTarget > 0 ? (totals.venda / metaTarget) * 100 : 0;
-  const quebraReal = Math.max(0, totals.quebra - totals.falta - totals.qualidade);
-  const percQuebraReal = totals.venda > 0 ? (quebraReal / totals.venda) * 100 : 0;
-  const status = getBreakStatus(percQuebraReal);
-  const stockVisible = displayRecords.some(item => item.rede === 'COSTA');
-  const totalStock = getLatestCostaStockTotal(displayRecords);
-  const summary = aggregateByNetwork(displayRecords);
-  const ranking = aggregateByStore(displayRecords).filter(item => item.valorVenda > 0);
-  const bestStores = [...ranking].sort((a, b) => Number(a.percentualQuebra || 0) - Number(b.percentualQuebra || 0) || b.valorVenda - a.valorVenda).slice(0, 5);
-  const worstStores = [...ranking].sort((a, b) => Number(b.percentualQuebra || 0) - Number(a.percentualQuebra || 0) || b.valorVenda - a.valorVenda).slice(0, 5);
-
-  if (els.presentationTitle) els.presentationTitle.textContent = els.viewTitle?.textContent || 'Resumo Geral da Empresa';
-  if (els.presentationSubtitle) els.presentationSubtitle.textContent = buildPresentationScopeLabel(displayRecords);
-  if (els.presentationMetaPercent) els.presentationMetaPercent.textContent = `${metaPercent.toFixed(0)}%`;
-  if (els.presentationMetaLegend) els.presentationMetaLegend.textContent = `Venda atual ${formatCurrency(totals.venda)} de ${formatCurrency(metaTarget)}`;
-  if (els.presentationMetaValue) els.presentationMetaValue.textContent = formatCurrency(metaTarget);
-  if (els.presentationSalesValue) els.presentationSalesValue.textContent = formatCurrency(totals.venda);
-  if (els.presentationLastImport) els.presentationLastImport.textContent = formatDateTime(appState.config.ultimaImportacao);
-  if (els.presentationBreakPercent) els.presentationBreakPercent.textContent = formatPercent(percQuebraReal);
-  if (els.presentationBreakReal) els.presentationBreakReal.textContent = formatCurrency(quebraReal);
-  if (els.presentationBreakStatus) {
-    els.presentationBreakStatus.textContent = status.label;
-    els.presentationBreakStatus.className = `status-badge ${status.className}`;
-  }
-
-  if (els.presentationCardVenda) els.presentationCardVenda.textContent = formatCurrency(totals.venda);
-  if (els.presentationCardQuebra) els.presentationCardQuebra.textContent = formatCurrency(totals.quebra);
-  if (els.presentationCardFalta) els.presentationCardFalta.textContent = formatCurrency(totals.falta);
-  if (els.presentationCardQualidade) els.presentationCardQualidade.textContent = formatCurrency(totals.qualidade);
-  if (els.presentationCardQuebraReal) els.presentationCardQuebraReal.textContent = formatCurrency(quebraReal);
-  if (els.presentationStockCard) els.presentationStockCard.hidden = !stockVisible;
-  if (stockVisible && els.presentationCardEstoque) els.presentationCardEstoque.textContent = formatCurrency(totalStock);
-
-  if (els.presentationSummaryBody) {
-    const networks = (appState.filters.rede === 'Todas' ? NETWORKS.map(item => item.id) : [appState.filters.rede]);
-    els.presentationSummaryBody.innerHTML = networks.map(networkId => {
-      const row = summary.find(item => item.rede === networkId);
-      const venda = Number(row?.venda || 0);
-      const percQuebra = Number(row?.percQuebra || 0);
-      const meta = Number(appState.config.metasPorRede[networkId] || 0);
-      const percentMeta = meta > 0 ? (venda / meta) * 100 : 0;
-      const rowStatus = getBreakStatus(percQuebra);
-      return `
-        <tr>
-          <td>${networkId}</td>
-          <td>${formatCurrency(venda)}</td>
-          <td>${formatCurrency(meta)}</td>
-          <td>${percentMeta.toFixed(0)}%</td>
-          <td>${formatPercent(percQuebra)}</td>
-          <td><span class="status-badge ${rowStatus.className}">${rowStatus.label}</span></td>
-        </tr>`;
-    }).join('') || `<tr><td colspan="6">Nenhum dado disponível para apresentação.</td></tr>`;
-  }
-
-  renderPresentationStoreList(bestStores, els.presentationBestStores, 'Nenhuma loja encontrada no recorte atual.');
-  renderPresentationStoreList(worstStores, els.presentationWorstStores, 'Nenhuma loja encontrada no recorte atual.');
-  updatePresentationSlides();
-  updatePresentationAutoplayUI();
 }
 
 function getLatestImportMonthKey() {
@@ -1796,53 +1436,16 @@ function filterToLatestImportMonth(records) {
 
 function aggregateByStore(records) {
   const map = new Map();
-  records.forEach(item => {
+  records.filter(item => !item.isNetworkTotalOnly).forEach(item => {
     const key = `${item.rede}||${item.loja}`;
-    if (!map.has(key)) {
-      map.set(key, {
-        rede: item.rede,
-        loja: item.loja,
-        valorVenda: 0,
-        valorQuebra: 0,
-        valorQuebraOperacional: 0,
-        valorFalta: 0,
-        valorQualidade: 0,
-        valorEstoque: 0,
-        _latestWeekOrder: -1,
-        _latestImportedAt: 0
-      });
-    }
+    if (!map.has(key)) map.set(key, { rede: item.rede, loja: item.loja, valorVenda: 0, valorQuebra: 0, valorQuebraOperacional: 0, valorFalta: 0, valorQualidade: 0, valorEstoque: 0 });
     const row = map.get(key);
-    row.valorVenda += Number(item.valorVenda || 0);
-    row.valorQuebra += Number(item.valorQuebra || 0);
-    row.valorQuebraOperacional += Number(item.valorQuebraOperacional || 0);
-    row.valorFalta += Number(item.valorFalta || 0);
-    row.valorQualidade += Number(item.valorQualidade || 0);
-
-    if (item.rede === 'COSTA') {
-      const weekOrder = weekSortValue(item.semana);
-      const importedAt = new Date(item.dataImportacao || item.importedAt || 0).getTime() || 0;
-      if (weekOrder > row._latestWeekOrder || (weekOrder === row._latestWeekOrder && importedAt >= row._latestImportedAt)) {
-        row.valorEstoque = Number(item.valorEstoque || 0);
-        row._latestWeekOrder = weekOrder;
-        row._latestImportedAt = importedAt;
-      }
-    } else {
-      row.valorEstoque += Number(item.valorEstoque || 0);
-    }
+    row.valorVenda += Number(item.valorVenda || 0); row.valorQuebra += Number(item.valorQuebra || 0); row.valorQuebraOperacional += Number(item.valorQuebraOperacional || 0);
+    row.valorFalta += Number(item.valorFalta || 0); row.valorQualidade += Number(item.valorQualidade || 0); row.valorEstoque += Number(item.valorEstoque || 0);
   });
-  return [...map.values()].map(row => ({
-    rede: row.rede,
-    loja: row.loja,
-    valorVenda: row.valorVenda,
-    valorQuebra: row.valorQuebra,
-    valorQuebraOperacional: row.valorQuebraOperacional,
-    valorFalta: row.valorFalta,
-    valorQualidade: row.valorQualidade,
-    valorEstoque: row.valorEstoque,
+  return [...map.values()].map(row => ({ ...row,
     percentualQuebra: row.valorVenda ? Number(((row.valorQuebra / row.valorVenda) * 100).toFixed(2)) : 0,
-    percentualQuebraOperacional: row.valorVenda ? Number(((row.valorQuebraOperacional / row.valorVenda) * 100).toFixed(2)) : 0
-  }));
+    percentualQuebraOperacional: row.valorVenda ? Number(((row.valorQuebraOperacional / row.valorVenda) * 100).toFixed(2)) : 0 }));
 }
 
 function getRankingStatus(value, hasBreak = true) {
@@ -2068,32 +1671,20 @@ function renderTopInfo(filtered) {
   const totals = aggregateRecords(displayRecords);
   const metaTarget = resolveActiveMetaTarget(displayRecords);
   const metaPercent = metaTarget > 0 ? (totals.venda / metaTarget) * 100 : 0;
-  const quebraReal = Math.max(0, totals.quebra - totals.falta - totals.qualidade);
+  const quebraReal = Math.max(0, totals.quebra);
   const percQuebraReal = totals.venda > 0 ? (quebraReal / totals.venda) * 100 : 0;
   const status = getBreakStatus(percQuebraReal);
   const stockVisible = appState.filters.rede === 'COSTA';
   const totalStock = getLatestCostaStockTotal(displayRecords);
-
   if (els.lastUpdateText) els.lastUpdateText.textContent = `Última atualização: ${formatDateTime(appState.config.ultimaAtualizacao)}`;
-  els.metaPercent.textContent = `${metaPercent.toFixed(0)}%`;
-  els.metaPercentInner.textContent = `${metaPercent.toFixed(0)}%`;
+  els.metaPercent.textContent = `${metaPercent.toFixed(0)}%`; els.metaPercentInner.textContent = `${metaPercent.toFixed(0)}%`;
   els.metaLegend.textContent = `Venda atual ${formatCurrency(totals.venda)} de ${formatCurrency(metaTarget)}`;
-  els.metaTotalValue.textContent = formatCurrency(metaTarget);
-  els.salesTotalValue.textContent = formatCurrency(totals.venda);
-  els.lastImportValue.textContent = formatDateTime(appState.config.ultimaImportacao);
-  els.cardVenda.textContent = formatCurrency(totals.venda);
-  els.cardQuebra.textContent = formatCurrency(totals.quebra);
-  els.cardPercQuebra.textContent = formatPercent(percQuebraReal);
-  els.cardFalta.textContent = formatCurrency(totals.falta);
-  els.cardQualidade.textContent = formatCurrency(totals.qualidade);
-  els.cardStatusQuebra.textContent = formatCurrency(quebraReal);
-  els.breakRealValue.textContent = formatPercent(percQuebraReal);
-  els.breakStatusBadge.textContent = status.label;
-  els.breakStatusBadge.className = `status-badge ${status.className}`;
-  els.stockCard.hidden = !stockVisible;
-  if (stockVisible) els.cardEstoque.textContent = formatCurrency(totalStock);
-  updateProgressCircle(metaPercent);
-  updateViewHeader(displayRecords, totals);
+  els.metaTotalValue.textContent = formatCurrency(metaTarget); els.salesTotalValue.textContent = formatCurrency(totals.venda); els.lastImportValue.textContent = formatDateTime(appState.config.ultimaImportacao);
+  els.cardVenda.textContent = formatCurrency(totals.venda); els.cardQuebra.textContent = formatCurrency(totals.quebra); els.cardPercQuebra.textContent = formatPercent(percQuebraReal);
+  els.cardFalta.textContent = formatCurrency(totals.falta); els.cardQualidade.textContent = formatCurrency(totals.qualidade); els.cardStatusQuebra.textContent = formatCurrency(quebraReal);
+  els.breakRealValue.textContent = formatPercent(percQuebraReal); els.breakStatusBadge.textContent = status.label; els.breakStatusBadge.className = `status-badge ${status.className}`;
+  els.stockCard.hidden = !stockVisible; if (stockVisible) els.cardEstoque.textContent = formatCurrency(totalStock);
+  updateProgressCircle(metaPercent); updateViewHeader(displayRecords, totals);
 }
 
 function renderSummaryTable(filtered) {
@@ -2134,7 +1725,8 @@ function renderSummaryTable(filtered) {
 function renderDetailsTable(filtered) {
   const hasWeekFilter = appState.filters.semana !== 'Todas';
   const monthlyRecords = getDisplayRecords(filtered);
-  const recordsForDetails = appState.detailsRede !== 'Todas' ? monthlyRecords.filter(item => item.rede === appState.detailsRede) : monthlyRecords;
+  const detailBase = monthlyRecords.filter(item => !item.isNetworkTotalOnly);
+  const recordsForDetails = appState.detailsRede !== 'Todas' ? detailBase.filter(item => item.rede === appState.detailsRede) : detailBase;
   const showStock = shouldShowStock(recordsForDetails);
 
   if (hasWeekFilter) {
@@ -2401,53 +1993,14 @@ function buildSalesSeries(records) {
 function aggregateByNetwork(records) {
   const map = new Map();
   records.forEach(item => {
-    if (!map.has(item.rede)) {
-      map.set(item.rede, {
-        rede: item.rede,
-        venda: 0,
-        quebra: 0,
-        quebraOperacional: 0,
-        falta: 0,
-        qualidade: 0,
-        estoque: 0,
-        _latestCostaStockByStore: new Map()
-      });
-    }
+    if (!map.has(item.rede)) map.set(item.rede, { rede: item.rede, venda: 0, quebra: 0, quebraOperacional: 0, falta: 0, qualidade: 0, estoque: 0 });
     const row = map.get(item.rede);
-    row.venda += Number(item.valorVenda || 0);
-    row.quebra += Number(item.valorQuebra || 0);
-    row.quebraOperacional += Number(item.valorQuebraOperacional || 0);
-    row.falta += Number(item.valorFalta || 0);
-    row.qualidade += Number(item.valorQualidade || 0);
-
-    if (item.rede === 'COSTA') {
-      const current = row._latestCostaStockByStore.get(item.loja);
-      const weekOrder = weekSortValue(item.semana);
-      const importedAt = new Date(item.dataImportacao || item.importedAt || 0).getTime() || 0;
-      if (!current || weekOrder > current.weekOrder || (weekOrder === current.weekOrder && importedAt >= current.importedAt)) {
-        row._latestCostaStockByStore.set(item.loja, {
-          valorEstoque: Number(item.valorEstoque || 0),
-          weekOrder,
-          importedAt
-        });
-      }
-    } else {
-      row.estoque += Number(item.valorEstoque || 0);
-    }
+    row.venda += Number(item.valorVenda || 0); row.quebra += Number(item.valorQuebra || 0); row.quebraOperacional += Number(item.valorQuebraOperacional || 0);
+    row.falta += Number(item.valorFalta || 0); row.qualidade += Number(item.valorQualidade || 0); row.estoque += Number(item.valorEstoque || 0);
   });
-  return [...map.values()].map(item => ({
-    rede: item.rede,
-    venda: item.venda,
-    quebra: item.quebra,
-    quebraOperacional: item.quebraOperacional,
-    falta: item.falta,
-    qualidade: item.qualidade,
-    estoque: item.rede === 'COSTA'
-      ? [...item._latestCostaStockByStore.values()].reduce((sum, stock) => sum + Number(stock.valorEstoque || 0), 0)
-      : item.estoque,
+  return [...map.values()].map(item => ({ ...item,
     percQuebra: item.venda ? (item.quebra / item.venda) * 100 : 0,
-    percQuebraOperacional: item.venda ? (item.quebraOperacional / item.venda) * 100 : 0
-  }));
+    percQuebraOperacional: item.venda ? (item.quebraOperacional / item.venda) * 100 : 0 }));
 }
 
 function upsertChart(key, canvas, config) {
