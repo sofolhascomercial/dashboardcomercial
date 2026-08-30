@@ -17,6 +17,7 @@ const ADM_CREDENTIALS = {
 
 const STORAGE_KEY = 'sofolhas-dashboard-v7';
 const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v6'];
+const HISTORY_SEED_VERSION = 'historico-semanal-2026-jan-ago3-v1';
 const BREAK_LIMIT = 12;
 const WARNING_LIMIT = 10;
 const CIRCLE_LENGTH = 326.73;
@@ -52,6 +53,7 @@ const COMPER_FORT_STORE_MAPPINGS = [
 
 const appState = {
   data: [],
+  storeData: [],
   config: {
     metaGeral: 1000000,
     metasPorRede: {},
@@ -72,7 +74,9 @@ const appState = {
   isAdmAuthenticated: false,
   customSelects: {},
   charts: {},
-  imports: []
+  imports: [],
+  storeImports: [],
+  monthlyDrilldown: { network: '', store: '' }
 };
 
 const els = {};
@@ -128,11 +132,13 @@ function sanitizeForFirebase(value) {
 function exportStateSnapshot() {
   return sanitizeForFirebase({
     data: appState.data,
+    storeData: appState.storeData,
     config: {
       ...appState.config,
       metasPorRede: serializeMetaKeysForFirebase(appState.config.metasPorRede)
     },
-    imports: appState.imports
+    imports: appState.imports,
+    storeImports: appState.storeImports
   });
 }
 
@@ -149,8 +155,12 @@ function applyPersistedState(saved) {
 
   if (saved) {
     appState.data = Array.isArray(saved.data) ? saved.data : [];
+    appState.storeData = Array.isArray(saved.storeData) ? saved.storeData : [];
     appState.imports = Array.isArray(saved.imports)
       ? saved.imports.sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0))
+      : [];
+    appState.storeImports = Array.isArray(saved.storeImports)
+      ? saved.storeImports.sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0))
       : [];
     appState.config = {
       ...appState.config,
@@ -159,7 +169,9 @@ function applyPersistedState(saved) {
     };
   } else {
     appState.data = [];
+    appState.storeData = [];
     appState.imports = [];
+    appState.storeImports = [];
     appState.config = {
       ...appState.config,
       metasPorRede: defaultMetasPorRede(),
@@ -170,13 +182,17 @@ function applyPersistedState(saved) {
 
   if (looksLikeSampleData(appState.data, appState.imports)) {
     appState.data = [];
+    appState.storeData = [];
     appState.imports = [];
+    appState.storeImports = [];
     appState.config.ultimaAtualizacao = null;
     appState.config.ultimaImportacao = null;
   }
 
   appState.data = appState.data.map(normalizeStoredRecord);
+  appState.storeData = appState.storeData.map(normalizeStoredStoreRecord);
   appState.imports = appState.imports.map(normalizeStoredImport);
+  appState.storeImports = appState.storeImports.map(normalizeStoredImport);
   appState.config.metaGeral = calculateMetaGeralFromNetworks(appState.config.metasPorRede);
 }
 
@@ -462,6 +478,17 @@ function normalizeStoredRecord(record) {
   };
 }
 
+function normalizeStoredStoreRecord(record) {
+  if (!record || typeof record !== 'object') return record;
+  const base = normalizeStoredRecord(record);
+  return {
+    ...base,
+    valorRecebido: Number(record.valorRecebido || 0),
+    sourceType: 'store-detail',
+    isNetworkTotalOnly: false
+  };
+}
+
 function normalizeStoredImport(batch) {
   if (!batch || typeof batch !== 'object') return batch;
   const monthLabel = getMonthLabel(batch.monthLabel || batch.monthValue || '');
@@ -474,6 +501,48 @@ function normalizeStoredImport(batch) {
     verificationStatus: batch.verificationStatus || 'ok',
     verificationItems: Array.isArray(batch.verificationItems) ? batch.verificationItems : []
   };
+}
+
+
+function historyRecordKey(record) {
+  if (!record) return '';
+  const monthKey = record.monthKey || inferRecordMonthKey(record);
+  const network = normalizeNetworkName(record.rede || '');
+  const store = normalizeStoreKey(record.loja || '');
+  const week = String(record.semana || '').trim();
+  return [monthKey, week, network, store].join('|');
+}
+
+function mergePreloadedHistory() {
+  const seed = window.__SOFOLHAS_PRELOADED_HISTORY__;
+  if (!seed || !Array.isArray(seed.records) || !seed.records.length) return false;
+  const version = String(seed.version || HISTORY_SEED_VERSION);
+  if (appState.config.historySeedVersion === version) return false;
+
+  const seededRecords = seed.records.map(normalizeStoredStoreRecord);
+  const seededKeys = new Set(seededRecords.map(historyRecordKey).filter(Boolean));
+
+  // Na primeira migração, a base histórica fornecida substitui registros do
+  // mesmo mês + semana + rede + loja. Depois disso, novas importações do ADM
+  // prevalecem, porque a versão da migração fica salva no Firebase/localStorage.
+  appState.storeData = appState.storeData.filter(item => {
+    if (item?.historySource) return false;
+    return !seededKeys.has(historyRecordKey(item));
+  });
+  appState.storeData.push(...seededRecords);
+
+  const seedBatches = (seed.batches || []).map(normalizeStoredImport);
+  const seedBatchIds = new Set(seedBatches.map(item => item.id));
+  appState.storeImports = [
+    ...seedBatches,
+    ...appState.storeImports.filter(item => !item?.isPreloadedHistory && !seedBatchIds.has(item.id))
+  ].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+
+  appState.config.historySeedVersion = version;
+  appState.config.historySeededAt = new Date().toISOString();
+  appState.config.ultimaAtualizacao = new Date().toISOString();
+  if (!appState.config.ultimaImportacao) appState.config.ultimaImportacao = seed.generatedAt || new Date().toISOString();
+  return true;
 }
 
 
@@ -512,6 +581,13 @@ function cacheElements() {
     weekInput: document.getElementById('weekInput'),
     importExcelBtn: document.getElementById('importExcelBtn'),
     importFeedback: document.getElementById('importFeedback'),
+    storeExcelFileInput: document.getElementById('storeExcelFileInput'),
+    storeMonthInput: document.getElementById('storeMonthInput'),
+    storeWeekInput: document.getElementById('storeWeekInput'),
+    importStoreExcelBtn: document.getElementById('importStoreExcelBtn'),
+    storeImportFeedback: document.getElementById('storeImportFeedback'),
+    storeImportBatchCount: document.getElementById('storeImportBatchCount'),
+    storeImportBatchesTableBody: document.getElementById('storeImportBatchesTableBody'),
     importBatchCount: document.getElementById('importBatchCount'),
     importBatchesTableBody: document.getElementById('importBatchesTableBody'),
     verificationModal: document.getElementById('verificationModal'),
@@ -562,6 +638,9 @@ function cacheElements() {
     breakByStoreChart: document.getElementById('breakByStoreChart'),
     bestBreakByStoreChart: document.getElementById('bestBreakByStoreChart'),
     networkDistributionChart: document.getElementById('networkDistributionChart'),
+    monthlySummaryPeriod: document.getElementById('monthlySummaryPeriod'),
+    monthlyBreadcrumbs: document.getElementById('monthlyBreadcrumbs'),
+    monthlySummaryBody: document.getElementById('monthlySummaryBody'),
     admNavItems: [...document.querySelectorAll('[data-adm-tab]')],
     admPanels: [...document.querySelectorAll('[data-adm-panel]')]
   });
@@ -574,7 +653,7 @@ async function seedInitialState() {
   const firebaseReady = await initFirebaseBridge();
   if (firebaseReady) {
     const remoteState = await loadRemoteStateOnce();
-    const hasRemoteState = remoteState && (Array.isArray(remoteState.data) || Array.isArray(remoteState.imports) || remoteState.config);
+    const hasRemoteState = remoteState && (Array.isArray(remoteState.data) || Array.isArray(remoteState.storeData) || Array.isArray(remoteState.imports) || Array.isArray(remoteState.storeImports) || remoteState.config);
 
     if (hasRemoteState) {
       applyPersistedState(remoteState);
@@ -590,6 +669,13 @@ async function seedInitialState() {
   }
 
   firebaseBridge.initialLoadComplete = true;
+
+  const historyChanged = mergePreloadedHistory();
+  if (historyChanged) {
+    syncMesOptions();
+    syncSemanaOptions();
+    persistLocal();
+  }
 }
 
 function defaultMetasPorRede() {
@@ -758,7 +844,7 @@ function createCustomSelect(id, options, selectedValue) {
 }
 
 function syncLojaOptions() {
-  let dataForStores = appState.data.filter(item => !item.isNetworkTotalOnly);
+  let dataForStores = [...appState.data.filter(item => !item.isNetworkTotalOnly), ...appState.storeData];
   if (appState.filters.rede !== 'Todas') dataForStores = dataForStores.filter(item => item.rede === appState.filters.rede);
   if (appState.filters.mes !== 'Todas') dataForStores = dataForStores.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
   const stores = [...new Set(dataForStores.map(item => item.loja))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -775,7 +861,7 @@ function formatMonthFilterLabel(monthKey) {
 }
 
 function syncMesOptions() {
-  const monthKeys = [...new Set(appState.data.map(item => item.monthKey || inferRecordMonthKey(item)).filter(Boolean))]
+  const monthKeys = [...new Set([...appState.data, ...appState.storeData].map(item => item.monthKey || inferRecordMonthKey(item)).filter(Boolean))]
     .sort((a, b) => String(b).localeCompare(String(a), 'pt-BR', { numeric: true }));
   const selected = monthKeys.includes(appState.filters.mes) ? appState.filters.mes : 'Todas';
   appState.filters.mes = selected;
@@ -783,7 +869,7 @@ function syncMesOptions() {
 }
 
 function syncSemanaOptions() {
-  let source = appState.data;
+  let source = [...appState.data, ...appState.storeData];
   if (appState.filters.mes !== 'Todas') {
     source = source.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
   }
@@ -815,7 +901,9 @@ function bindEvents() {
   if (els.closeAdmModalBtn) els.closeAdmModalBtn.addEventListener('click', closeAdmModal);
   if (els.saveGoalsBtn) els.saveGoalsBtn.addEventListener('click', saveGoals);
   if (els.importExcelBtn) els.importExcelBtn.addEventListener('click', importExcelFile);
+  if (els.importStoreExcelBtn) els.importStoreExcelBtn.addEventListener('click', importStoreExcelFile);
   if (els.importBatchesTableBody) els.importBatchesTableBody.addEventListener('click', handleImportBatchAction);
+  if (els.storeImportBatchesTableBody) els.storeImportBatchesTableBody.addEventListener('click', handleStoreImportBatchAction);
   if (els.closeVerificationModalBtn) els.closeVerificationModalBtn.addEventListener('click', closeVerificationModal);
   if (els.verificationModal) els.verificationModal.addEventListener('click', event => {
     if (event.target === els.verificationModal) closeVerificationModal();
@@ -825,6 +913,8 @@ function bindEvents() {
     appState.rankingRede = event.target.value;
     refreshAll();
   });
+  if (els.monthlySummaryBody) els.monthlySummaryBody.addEventListener('click', handleMonthlySummaryClick);
+  if (els.monthlyBreadcrumbs) els.monthlyBreadcrumbs.addEventListener('click', handleMonthlyBreadcrumbClick);
 }
 
 function setDrawer(open) {
@@ -838,6 +928,7 @@ function clearFilters() {
   appState.filters = { rede: 'Todas', loja: 'Todas', mes: 'Todas', semana: 'Todas' };
   appState.detailsRede = 'Todas';
   appState.rankingRede = 'Todas';
+  appState.monthlyDrilldown = { network: '', store: '' };
   initCustomSelects();
   refreshAll();
 }
@@ -876,6 +967,7 @@ function setAdmTab(tab) {
 function openAdmModal() {
   buildMetaInputs();
   renderImportBatchesTable();
+  renderStoreImportBatchesTable();
   renderAdminTable();
   setAdmTab(appState.admTab || 'metas');
   els.admModal.hidden = false;
@@ -1022,6 +1114,204 @@ function importExcelFile() {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+function setStoreImportFeedback(message, isError) {
+  if (!els.storeImportFeedback) return;
+  els.storeImportFeedback.textContent = message;
+  els.storeImportFeedback.className = `feedback ${isError ? 'is-error' : 'is-success'}`;
+}
+
+function importStoreExcelFile() {
+  const file = els.storeExcelFileInput?.files?.[0];
+  const weekValue = (els.storeWeekInput?.value || '').trim();
+  const monthValue = (els.storeMonthInput?.value || '').trim();
+  const monthLabel = getMonthLabel(monthValue);
+  if (!file) return setStoreImportFeedback('Selecione a planilha semanal por loja.', true);
+  if (!monthValue) return setStoreImportFeedback('Selecione o mês da planilha.', true);
+  if (!weekValue) return setStoreImportFeedback('Selecione a semana da planilha.', true);
+  if (!window.XLSX) return setStoreImportFeedback('Biblioteca XLSX não carregada.', true);
+
+  const reader = new FileReader();
+  reader.onload = event => {
+    try {
+      const currentYear = new Date().getFullYear();
+      const targetMonthKey = `${currentYear}-${monthValue}`;
+      const replacedBatchIds = new Set(
+        appState.storeImports
+          .filter(batch => (batch.monthKey || inferRecordMonthKey(batch)) === targetMonthKey && batch.weekLabel === weekValue)
+          .map(batch => batch.id)
+      );
+
+      // A base por loja é uma fotografia completa da semana: reimportar substitui o período inteiro.
+      appState.storeData = appState.storeData.filter(item => {
+        const samePeriod = (item.monthKey || inferRecordMonthKey(item)) === targetMonthKey && item.semana === weekValue;
+        return !samePeriod && !replacedBatchIds.has(item.sourceBatchId);
+      });
+      appState.storeImports = appState.storeImports.filter(batch => !replacedBatchIds.has(batch.id));
+
+      const workbook = XLSX.read(event.target.result, { type: 'array', cellDates: true });
+      const parsed = parseStoreWorkbook(workbook, file.name, { weekLabel: weekValue, monthValue, monthLabel });
+      if (!parsed.records.length) return setStoreImportFeedback('Nenhuma loja válida foi encontrada na planilha.', true);
+
+      appState.storeData = [...appState.storeData, ...parsed.records].map(normalizeStoredStoreRecord);
+      appState.storeImports = [parsed.batch, ...appState.storeImports].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+      appState.config.ultimaAtualizacao = new Date().toISOString();
+      appState.monthlyDrilldown = { network: '', store: '' };
+      persistLocal();
+      refreshAll();
+
+      els.storeExcelFileInput.value = '';
+      if (els.storeWeekInput) els.storeWeekInput.value = '';
+      if (els.storeMonthInput) els.storeMonthInput.value = '';
+      const replaceText = replacedBatchIds.size ? ' Período anterior substituído.' : '';
+      const statusText = parsed.batch.verificationStatus === 'ok' ? 'Conferência OK.' : 'Importado com divergência de conferência.';
+      setStoreImportFeedback(`${parsed.records.length} lojas/linhas importadas.${replaceText} ${statusText}`, parsed.batch.verificationStatus === 'bad');
+    } catch (error) {
+      setStoreImportFeedback(`Erro ao processar planilha por loja: ${error.message}`, true);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseStoreWorkbook(workbook, fileName, periodInfo = {}) {
+  const batchId = `store-batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const importedAt = new Date().toISOString();
+  const currentYear = new Date(importedAt).getFullYear();
+  const weekLabel = periodInfo.weekLabel || suggestWeekLabel(appState.storeImports.length + 1);
+  const monthValue = periodInfo.monthValue || String(new Date(importedAt).getMonth() + 1).padStart(2, '0');
+  const monthLabel = periodInfo.monthLabel || getMonthLabel(monthValue);
+  const monthKey = `${currentYear}-${monthValue}`;
+  const periodLabel = `${weekLabel} de ${monthLabel}`;
+  const records = [];
+  const verificationItems = [];
+  const networks = new Set();
+
+  workbook.SheetNames.forEach(sheetName => {
+    const sheet = workbook.Sheets[sheetName];
+    const extracted = extractWorksheetObjects(sheet);
+    if (!extracted.rows.length) return;
+    const network = inferStoreDetailNetwork(sheetName, extracted.rows);
+    if (!network) return;
+    const parsed = parseStoreDetailSheet({
+      network, sheetName, rows: extracted.rows, batchId, fileName, importedAt,
+      weekLabel, monthLabel, monthKey, periodLabel
+    });
+    if (parsed.records.length) {
+      records.push(...parsed.records);
+      networks.add(network);
+    }
+    if (parsed.verification) verificationItems.push(parsed.verification);
+  });
+
+  const totals = aggregateRecords(records);
+  const verificationStatus = verificationItems.some(item => item.status === 'bad') ? 'bad' : 'ok';
+  return {
+    records,
+    batch: {
+      id: batchId,
+      type: 'store-detail',
+      fileName,
+      importedAt,
+      weekLabel,
+      monthLabel,
+      monthKey,
+      periodLabel,
+      recordCount: records.length,
+      networkCount: networks.size,
+      networks: [...networks],
+      totalVenda: Number(totals.venda.toFixed(2)),
+      totalQuebra: Number(totals.quebra.toFixed(2)),
+      verificationStatus,
+      verificationItems
+    }
+  };
+}
+
+function inferStoreDetailNetwork(sheetName, rows = []) {
+  const normalized = normalizeText(sheetName);
+  if (normalized.includes('dia a dia')) return 'ATACADÃO DIA A DIA';
+  if (normalized.includes('costa')) return 'COSTA';
+  if (normalized.includes('g.p') || normalized.includes('g p') || normalized.includes('comper') || normalized.includes('fort')) return 'COMPER/FORT';
+  if (normalized.includes('vivendas')) return 'VIVENDAS';
+  if (normalized.includes('assa')) return 'ASSAÍ';
+  if (normalized.includes('bretas')) return 'BRETAS';
+  if (normalized.includes('consignad')) return 'CONSIGNADOS';
+  if (normalized.includes('variad')) return 'VARIADOS';
+  if (normalized.includes('nossa kaza') || normalized.includes('nossa casa')) return 'NOSSA KAZA';
+
+  // O modelo atual usa "Planilha7" para Economart/Cerramix, que pertencem ao bloco VARIADOS.
+  const labels = (rows || []).slice(0, 8).map(row => normalizeText(getRowLabel(row))).join(' | ');
+  if (labels.includes('economart') || labels.includes('cerramix')) return 'VARIADOS';
+  return '';
+}
+
+function parseStoreDetailSheet({ network, sheetName, rows, batchId, fileName, importedAt, weekLabel, monthLabel, monthKey, periodLabel }) {
+  const totalRow = rows.find(row => isTotalRow(getRowLabel(row)));
+  const dataRows = rows.filter(row => !isTotalRow(getRowLabel(row)));
+  const records = dataRows.map((row, index) => {
+    const originalStore = String(getRowLabel(row) || '').trim();
+    if (!originalStore) return null;
+    const normalizedStore = normalizeStoreAndNetwork(originalStore, network);
+    const rede = normalizedStore.rede || network;
+    const store = normalizedStore.loja || originalStore;
+
+    const venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
+    const falta = parseMoney(getFlexibleCell(row, [['DEV', 'FALTA'], ['FALTA']]));
+    const qualidade = parseMoney(getFlexibleCell(row, [['DEV', 'QUALIDADE'], ['QUALIDADE']]));
+    const estoque = parseMoney(getFlexibleCell(row, [['ESTOQUE', 'EM', 'LOJA'], ['ESTOQUE', 'LOJA'], ['ESTOQUE']]));
+    const recebido = parseMoney(getFlexibleCell(row, [['RECEBIDO']]));
+    const quebra = parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA']]));
+    const percentualQuebra = venda > 0 ? Number(((quebra / venda) * 100).toFixed(2)) : 0;
+
+    return {
+      id: `${batchId}-${slugify(rede)}-${slugify(store)}-${index + 1}`,
+      sourceBatchId: batchId,
+      sourceFileName: fileName,
+      sourceSheetName: sheetName,
+      sourceType: 'store-detail',
+      rede,
+      loja: store,
+      semana: weekLabel,
+      monthLabel,
+      monthKey,
+      periodLabel,
+      valorVenda: Number(venda.toFixed(2)),
+      valorVendaOriginal: Number(venda.toFixed(2)),
+      valorRecebido: Number(recebido.toFixed(2)),
+      valorQuebraOperacional: Number(quebra.toFixed(2)),
+      valorQuebraTotal: Number((quebra + falta + qualidade).toFixed(2)),
+      valorQuebra: Number(quebra.toFixed(2)),
+      valorFalta: Number(falta.toFixed(2)),
+      valorQualidade: Number(qualidade.toFixed(2)),
+      valorEstoque: Number(estoque.toFixed(2)),
+      percentualQuebra,
+      percentualFalta: venda > 0 ? Number(((falta / venda) * 100).toFixed(2)) : 0,
+      percentualQualidade: venda > 0 ? Number(((qualidade / venda) * 100).toFixed(2)) : 0,
+      statusQuebra: getBreakStatus(percentualQuebra).label,
+      dataImportacao: importedAt,
+      modeloImportacao: 'STORE_DETAIL'
+    };
+  }).filter(Boolean);
+
+  return { records, verification: buildStoreSheetVerification(sheetName, records, totalRow) };
+}
+
+function buildStoreSheetVerification(sheetName, records, totalRow) {
+  if (!records.length) return null;
+  if (!totalRow) return { type: 'store-sheet', sheetName, status: 'ok', label: 'Sem linha Total para conferir' };
+  const totals = aggregateRecords(records);
+  const expectedVenda = parseMoney(getFlexibleCell(totalRow, [['VENDA']]));
+  const expectedQuebra = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA']]));
+  const vendaDiff = Number((totals.venda - expectedVenda).toFixed(2));
+  const quebraDiff = Number((totals.quebra - expectedQuebra).toFixed(2));
+  const status = Math.abs(vendaDiff) <= 0.05 && Math.abs(quebraDiff) <= 0.05 ? 'ok' : 'bad';
+  return {
+    type: 'store-sheet', sheetName, status,
+    label: status === 'ok' ? 'Conferido' : 'Divergência no total da aba',
+    expectedVenda, actualVenda: totals.venda, vendaDiff,
+    expectedQuebra, actualQuebra: totals.quebra, quebraDiff
+  };
 }
 
 function parseImportedWorkbook(workbook, fileName, periodInfo = {}) {
@@ -1392,7 +1682,14 @@ function setImportFeedback(message, isError) {
 }
 
 function getFilteredData() {
-  return appState.data.filter(item => {
+  const requestedMonth = appState.filters.mes !== 'Todas'
+    ? appState.filters.mes
+    : getLatestImportMonthKey();
+
+  let source = requestedMonth ? getMonthlyNetworkBase(requestedMonth) : [...appState.data];
+  if (!source.length && appState.storeData.length) source = [...appState.storeData];
+
+  return source.filter(item => {
     const monthKey = item.monthKey || inferRecordMonthKey(item);
     const byRede = appState.filters.rede === 'Todas' || item.rede === appState.filters.rede;
     const byLoja = appState.filters.loja === 'Todas' || item.loja === appState.filters.loja;
@@ -1420,12 +1717,14 @@ function refreshAll() {
   updateDetailsSectionVisibility();
   renderAlerts(filtered);
   renderCharts(filtered);
+  renderMonthlySummary();
   renderImportBatchesTable();
+  renderStoreImportBatchesTable();
   renderAdminTable();
 }
 
 function getLatestImportMonthKey() {
-  return appState.imports[0]?.monthKey || inferRecordMonthKey({ importedAt: appState.config.ultimaImportacao || appState.config.ultimaAtualizacao });
+  return appState.imports[0]?.monthKey || appState.storeImports[0]?.monthKey || inferRecordMonthKey({ importedAt: appState.config.ultimaImportacao || appState.config.ultimaAtualizacao });
 }
 
 function filterToLatestImportMonth(records) {
@@ -1438,10 +1737,17 @@ function aggregateByStore(records) {
   const map = new Map();
   records.filter(item => !item.isNetworkTotalOnly).forEach(item => {
     const key = `${item.rede}||${item.loja}`;
-    if (!map.has(key)) map.set(key, { rede: item.rede, loja: item.loja, valorVenda: 0, valorQuebra: 0, valorQuebraOperacional: 0, valorFalta: 0, valorQualidade: 0, valorEstoque: 0 });
+    if (!map.has(key)) map.set(key, {
+      rede: item.rede, loja: item.loja, valorVenda: 0, valorQuebra: 0, valorQuebraOperacional: 0,
+      valorFalta: 0, valorQualidade: 0, valorEstoque: 0,
+      hasFaltaData: true, hasQualidadeData: true, hasEstoqueData: true
+    });
     const row = map.get(key);
     row.valorVenda += Number(item.valorVenda || 0); row.valorQuebra += Number(item.valorQuebra || 0); row.valorQuebraOperacional += Number(item.valorQuebraOperacional || 0);
     row.valorFalta += Number(item.valorFalta || 0); row.valorQualidade += Number(item.valorQualidade || 0); row.valorEstoque += Number(item.valorEstoque || 0);
+    if (item.hasFaltaData === false) row.hasFaltaData = false;
+    if (item.hasQualidadeData === false) row.hasQualidadeData = false;
+    if (item.hasEstoqueData === false) row.hasEstoqueData = false;
   });
   return [...map.values()].map(row => ({ ...row,
     percentualQuebra: row.valorVenda ? Number(((row.valorQuebra / row.valorVenda) * 100).toFixed(2)) : 0,
@@ -1681,9 +1987,11 @@ function renderTopInfo(filtered) {
   els.metaLegend.textContent = `Venda atual ${formatCurrency(totals.venda)} de ${formatCurrency(metaTarget)}`;
   els.metaTotalValue.textContent = formatCurrency(metaTarget); els.salesTotalValue.textContent = formatCurrency(totals.venda); els.lastImportValue.textContent = formatDateTime(appState.config.ultimaImportacao);
   els.cardVenda.textContent = formatCurrency(totals.venda); els.cardQuebra.textContent = formatCurrency(totals.quebra); els.cardPercQuebra.textContent = formatPercent(percQuebraReal);
-  els.cardFalta.textContent = formatCurrency(totals.falta); els.cardQualidade.textContent = formatCurrency(totals.qualidade); els.cardStatusQuebra.textContent = formatCurrency(quebraReal);
+  els.cardFalta.textContent = totals.hasFaltaData ? formatCurrency(totals.falta) : '—';
+  els.cardQualidade.textContent = totals.hasQualidadeData ? formatCurrency(totals.qualidade) : '—';
+  els.cardStatusQuebra.textContent = formatCurrency(quebraReal);
   els.breakRealValue.textContent = formatPercent(percQuebraReal); els.breakStatusBadge.textContent = status.label; els.breakStatusBadge.className = `status-badge ${status.className}`;
-  els.stockCard.hidden = !stockVisible; if (stockVisible) els.cardEstoque.textContent = formatCurrency(totalStock);
+  els.stockCard.hidden = !stockVisible; if (stockVisible) els.cardEstoque.textContent = totals.hasEstoqueData ? formatCurrency(totalStock) : '—';
   updateProgressCircle(metaPercent); updateViewHeader(displayRecords, totals);
 }
 
@@ -1757,10 +2065,10 @@ function renderDetailsTable(filtered) {
         <td>${formatCurrency(item.valorVenda)}</td>
         <td>${formatCurrency(meta)}</td>
         <td>${percentMeta.toFixed(0)}%</td>
-        ${showStock ? `<td>${formatCurrency(item.valorEstoque)}</td>` : ''}
+        ${showStock ? `<td>${item.hasEstoqueData === false ? '—' : formatCurrency(item.valorEstoque)}</td>` : ''}
         <td>${formatCurrency(item.valorQuebra)}</td>
-        <td>${formatCurrency(item.valorFalta)}</td>
-        <td>${formatCurrency(item.valorQualidade)}</td>
+        <td>${item.hasFaltaData === false ? '—' : formatCurrency(item.valorFalta)}</td>
+        <td>${item.hasQualidadeData === false ? '—' : formatCurrency(item.valorQualidade)}</td>
         <td>${formatPercent(item.percentualQuebra)}</td>
         <td><span class="status-badge ${status.className}">${status.label}</span></td>
       </tr>`;
@@ -1794,10 +2102,10 @@ function renderDetailsTable(filtered) {
       <td>${formatCurrency(item.valorVenda)}</td>
       <td>${formatCurrency(meta)}</td>
       <td>${percentMeta.toFixed(0)}%</td>
-      ${showStock ? `<td>${formatCurrency(item.valorEstoque)}</td>` : ''}
+      ${showStock ? `<td>${item.hasEstoqueData ? formatCurrency(item.valorEstoque) : '—'}</td>` : ''}
       <td>${formatCurrency(item.valorQuebra)}</td>
-      <td>${formatCurrency(item.valorFalta)}</td>
-      <td>${formatCurrency(item.valorQualidade)}</td>
+      <td>${item.hasFaltaData ? formatCurrency(item.valorFalta) : '—'}</td>
+      <td>${item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>
       <td>${formatPercent(item.percentualQuebra)}</td>
       <td><span class="status-badge ${status.className}">${status.label}</span></td>
     </tr>`;
@@ -1990,6 +2298,340 @@ function buildSalesSeries(records) {
   };
 }
 
+function getMonthlySummaryMonthKey() {
+  if (appState.filters.mes !== 'Todas') return appState.filters.mes;
+  const storeKey = appState.storeImports[0]?.monthKey || inferRecordMonthKey(appState.storeImports[0] || {});
+  if (storeKey) return storeKey;
+  return getLatestImportMonthKey();
+}
+
+function getMonthlyNetworkBase(monthKey) {
+  const official = appState.data.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey);
+  const officialNetworks = new Set(official.map(item => item.rede));
+  const fallback = appState.storeData.filter(item => {
+    const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
+    return sameMonth && !officialNetworks.has(item.rede);
+  });
+  return [...official, ...fallback];
+}
+
+function getMonthlyStoreBase(monthKey, network = '') {
+  return appState.storeData.filter(item => {
+    const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
+    const sameNetwork = !network || item.rede === network;
+    return sameMonth && sameNetwork;
+  });
+}
+
+function aggregateMonthlyStoreDetails(records) {
+  const map = new Map();
+  (records || []).forEach(item => {
+    const key = `${item.rede}||${item.loja}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        rede: item.rede, loja: item.loja, valorVenda: 0, valorQuebra: 0,
+        valorFalta: 0, valorQualidade: 0, valorRecebido: 0, valorEstoque: 0,
+        hasFaltaData: false, hasQualidadeData: false, hasEstoqueData: false,
+        weeks: new Set(), _latestWeek: -1, _latestImportedAt: 0
+      });
+    }
+    const row = map.get(key);
+    row.valorVenda += Number(item.valorVenda || 0);
+    row.valorQuebra += Number(item.valorQuebra || 0);
+    row.valorFalta += Number(item.valorFalta || 0);
+    row.valorQualidade += Number(item.valorQualidade || 0);
+    row.valorRecebido += Number(item.valorRecebido || 0);
+    if (item.hasFaltaData !== false) row.hasFaltaData = true;
+    if (item.hasQualidadeData !== false) row.hasQualidadeData = true;
+    if (item.hasEstoqueData !== false) row.hasEstoqueData = true;
+    row.weeks.add(item.semana);
+    const weekOrder = weekSortValue(item.semana);
+    const importedAt = new Date(item.dataImportacao || item.importedAt || 0).getTime() || 0;
+    if (weekOrder > row._latestWeek || (weekOrder === row._latestWeek && importedAt >= row._latestImportedAt)) {
+      row.valorEstoque = Number(item.valorEstoque || 0);
+      row._latestWeek = weekOrder;
+      row._latestImportedAt = importedAt;
+    }
+  });
+  return [...map.values()].map(row => ({
+    rede: row.rede,
+    loja: row.loja,
+    valorVenda: Number(row.valorVenda.toFixed(2)),
+    valorQuebra: Number(row.valorQuebra.toFixed(2)),
+    valorFalta: Number(row.valorFalta.toFixed(2)),
+    valorQualidade: Number(row.valorQualidade.toFixed(2)),
+    valorRecebido: Number(row.valorRecebido.toFixed(2)),
+    valorEstoque: Number(row.valorEstoque.toFixed(2)),
+    hasFaltaData: row.hasFaltaData,
+    hasQualidadeData: row.hasQualidadeData,
+    hasEstoqueData: row.hasEstoqueData,
+    weekCount: row.weeks.size,
+    percentualQuebra: row.valorVenda > 0 ? Number(((row.valorQuebra / row.valorVenda) * 100).toFixed(2)) : 0
+  }));
+}
+
+function aggregateWeeklyStoreDetails(records) {
+  const map = new Map();
+  (records || []).forEach(item => {
+    const key = item.semana || 'Sem semana';
+    if (!map.has(key)) map.set(key, {
+      semana: key, valorVenda: 0, valorQuebra: 0, valorFalta: 0, valorQualidade: 0, valorEstoque: 0, valorRecebido: 0,
+      hasFaltaData: false, hasQualidadeData: false, hasEstoqueData: false
+    });
+    const row = map.get(key);
+    row.valorVenda += Number(item.valorVenda || 0);
+    row.valorQuebra += Number(item.valorQuebra || 0);
+    row.valorFalta += Number(item.valorFalta || 0);
+    row.valorQualidade += Number(item.valorQualidade || 0);
+    row.valorEstoque += Number(item.valorEstoque || 0);
+    row.valorRecebido += Number(item.valorRecebido || 0);
+    if (item.hasFaltaData !== false) row.hasFaltaData = true;
+    if (item.hasQualidadeData !== false) row.hasQualidadeData = true;
+    if (item.hasEstoqueData !== false) row.hasEstoqueData = true;
+  });
+  return [...map.values()].map(row => ({
+    ...row,
+    percentualQuebra: row.valorVenda > 0 ? Number(((row.valorQuebra / row.valorVenda) * 100).toFixed(2)) : 0
+  })).sort((a, b) => weekSortValue(a.semana) - weekSortValue(b.semana));
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+}
+
+function monthlyStatusInfo(percent, sale) {
+  if (Number(sale || 0) <= 0) return { label: 'Sem venda', className: 'status--neutral' };
+  if (percent <= WARNING_LIMIT) return { label: 'Dentro da meta', className: 'status--good' };
+  if (percent <= BREAK_LIMIT) return { label: 'Atenção', className: 'status--warn' };
+  return { label: 'Acima da meta', className: 'status--bad' };
+}
+
+function renderMonthlySummary() {
+  if (!els.monthlySummaryBody || !els.monthlyBreadcrumbs || !els.monthlySummaryPeriod) return;
+  const monthKey = getMonthlySummaryMonthKey();
+  if (!monthKey) {
+    els.monthlySummaryPeriod.textContent = 'Sem período';
+    els.monthlyBreadcrumbs.innerHTML = '';
+    els.monthlySummaryBody.innerHTML = '<div class="monthly-empty">Importe as bases semanais para iniciar o resumo mensal.</div>';
+    destroyMonthlyStoreChart();
+    return;
+  }
+
+  els.monthlySummaryPeriod.textContent = formatMonthFilterLabel(monthKey);
+  const storeBase = getMonthlyStoreBase(monthKey);
+  const availableNetworks = new Set(storeBase.map(item => item.rede));
+  if (appState.monthlyDrilldown.network && !availableNetworks.has(appState.monthlyDrilldown.network)) {
+    appState.monthlyDrilldown = { network: '', store: '' };
+  }
+  if (appState.monthlyDrilldown.store) {
+    const exists = storeBase.some(item => item.rede === appState.monthlyDrilldown.network && item.loja === appState.monthlyDrilldown.store);
+    if (!exists) appState.monthlyDrilldown.store = '';
+  }
+
+  renderMonthlyBreadcrumbs();
+  if (appState.monthlyDrilldown.network && appState.monthlyDrilldown.store) {
+    renderMonthlyStoreWeeks(monthKey, appState.monthlyDrilldown.network, appState.monthlyDrilldown.store);
+  } else if (appState.monthlyDrilldown.network) {
+    renderMonthlyNetworkStores(monthKey, appState.monthlyDrilldown.network);
+  } else {
+    renderMonthlyNetworks(monthKey);
+  }
+}
+
+function renderMonthlyBreadcrumbs() {
+  const network = appState.monthlyDrilldown.network;
+  const store = appState.monthlyDrilldown.store;
+  const pieces = [`<button type="button" class="monthly-crumb ${!network ? 'is-current' : ''}" data-monthly-level="networks">Redes</button>`];
+  if (network) pieces.push(`<span>›</span><button type="button" class="monthly-crumb ${network && !store ? 'is-current' : ''}" data-monthly-level="stores">${escapeHtml(network)}</button>`);
+  if (store) pieces.push(`<span>›</span><span class="monthly-crumb is-current">${escapeHtml(store)}</span>`);
+  els.monthlyBreadcrumbs.innerHTML = pieces.join('');
+}
+
+function renderMonthlyNetworks(monthKey) {
+  destroyMonthlyStoreChart();
+  // O Resumo Mensal deve fechar exatamente com o drill-down por lojas.
+  // Por isso, sua fonte primária é sempre a base detalhada por loja.
+  let networkBase = getMonthlyStoreBase(monthKey);
+  if (!networkBase.length) networkBase = getMonthlyNetworkBase(monthKey);
+  if (appState.filters.rede !== 'Todas') networkBase = networkBase.filter(item => item.rede === appState.filters.rede);
+  const summaries = aggregateByNetwork(networkBase);
+  const storeBase = getMonthlyStoreBase(monthKey);
+  const ordered = summaries.sort((a, b) => {
+    const ai = NETWORKS.findIndex(item => item.id === a.rede);
+    const bi = NETWORKS.findIndex(item => item.id === b.rede);
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+  });
+
+  if (!ordered.length) {
+    els.monthlySummaryBody.innerHTML = '<div class="monthly-empty">Não há dados mensais para o período selecionado.</div>';
+    return;
+  }
+
+  els.monthlySummaryBody.innerHTML = `<div class="monthly-network-grid">${ordered.map(item => {
+    const stores = new Set(storeBase.filter(row => row.rede === item.rede).map(row => row.loja));
+    const percent = Number(item.percQuebra || 0);
+    const status = monthlyStatusInfo(percent, item.venda);
+    const networkConfig = NETWORKS.find(n => n.id === item.rede);
+    const hasBreak = networkConfig ? networkConfig.hasBreak !== false : true;
+    const canOpen = stores.size > 0;
+    return `<button type="button" class="monthly-network-card ${canOpen ? '' : 'is-disabled'}" ${canOpen ? `data-monthly-network="${escapeHtml(item.rede)}"` : 'disabled'}>
+      <div class="monthly-network-card__top">
+        <span class="monthly-network-name">${escapeHtml(item.rede)}</span>
+        <span class="status-badge ${hasBreak ? status.className : 'status--neutral'}">${hasBreak ? status.label : 'Sem quebra'}</span>
+      </div>
+      <strong class="monthly-network-percent">${hasBreak ? formatPercent(percent) : '—'}</strong>
+      <span class="monthly-network-caption">quebra no mês</span>
+      <div class="monthly-network-metrics">
+        <span><small>Venda</small><b>${formatCurrency(item.venda)}</b></span>
+        <span><small>Quebra</small><b>${formatCurrency(item.quebra)}</b></span>
+        <span><small>Lojas</small><b>${stores.size || '—'}</b></span>
+      </div>
+      <span class="monthly-network-action">${canOpen ? 'Ver lojas →' : 'Importe a base por loja'}</span>
+    </button>`;
+  }).join('')}</div>`;
+}
+
+function renderMonthlyNetworkStores(monthKey, network) {
+  destroyMonthlyStoreChart();
+  const records = getMonthlyStoreBase(monthKey, network);
+  const stores = aggregateMonthlyStoreDetails(records).sort((a, b) => b.percentualQuebra - a.percentualQuebra || b.valorVenda - a.valorVenda);
+  if (!stores.length) {
+    els.monthlySummaryBody.innerHTML = `<div class="monthly-empty">Ainda não há detalhamento por loja para ${escapeHtml(network)} neste mês.</div>`;
+    return;
+  }
+  const total = stores.reduce((acc, row) => {
+    acc.venda += row.valorVenda; acc.quebra += row.valorQuebra; return acc;
+  }, { venda: 0, quebra: 0 });
+  const perc = total.venda > 0 ? (total.quebra / total.venda) * 100 : 0;
+  const worst = stores[0];
+  const showStock = network === 'COSTA';
+
+  els.monthlySummaryBody.innerHTML = `
+    <div class="monthly-subsummary">
+      <div><span>Rede</span><strong>${escapeHtml(network)}</strong></div>
+      <div><span>Venda das lojas</span><strong>${formatCurrency(total.venda)}</strong></div>
+      <div><span>Quebra das lojas</span><strong>${formatCurrency(total.quebra)}</strong></div>
+      <div><span>% quebra</span><strong>${formatPercent(perc)}</strong></div>
+      <div><span>Maior quebra</span><strong>${escapeHtml(worst.loja)} • ${formatPercent(worst.percentualQuebra)}</strong></div>
+    </div>
+    <div class="table-wrap monthly-store-table-wrap">
+      <table class="monthly-store-table">
+        <thead><tr><th>Loja</th><th>Venda mês</th><th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>${showStock ? '<th>Estoque atual</th>' : ''}<th>Semanas</th><th></th></tr></thead>
+        <tbody>${stores.map(item => {
+          const status = monthlyStatusInfo(item.percentualQuebra, item.valorVenda);
+          return `<tr class="monthly-store-row" data-monthly-store="${escapeHtml(item.loja)}">
+            <td><strong>${escapeHtml(item.loja)}</strong><br><span class="status-badge ${status.className}">${status.label}</span></td>
+            <td>${formatCurrency(item.valorVenda)}</td>
+            <td>${formatCurrency(item.valorQuebra)}</td>
+            <td><strong>${formatPercent(item.percentualQuebra)}</strong></td>
+            <td>${item.hasFaltaData ? formatCurrency(item.valorFalta) : '—'}</td>
+            <td>${item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>
+            ${showStock ? `<td>${item.hasEstoqueData ? formatCurrency(item.valorEstoque) : '—'}</td>` : ''}
+            <td>${item.weekCount}</td>
+            <td><button type="button" class="btn btn--ghost btn--sm" data-monthly-store="${escapeHtml(item.loja)}">Semanas →</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderMonthlyStoreWeeks(monthKey, network, store) {
+  const records = getMonthlyStoreBase(monthKey, network).filter(item => item.loja === store);
+  const weeks = aggregateWeeklyStoreDetails(records);
+  if (!weeks.length) {
+    els.monthlySummaryBody.innerHTML = '<div class="monthly-empty">Nenhum resultado semanal encontrado para esta loja.</div>';
+    destroyMonthlyStoreChart();
+    return;
+  }
+  const totals = weeks.reduce((acc, row) => {
+    acc.venda += row.valorVenda; acc.quebra += row.valorQuebra; acc.falta += row.valorFalta; acc.qualidade += row.valorQualidade; return acc;
+  }, { venda: 0, quebra: 0, falta: 0, qualidade: 0 });
+  const percent = totals.venda > 0 ? (totals.quebra / totals.venda) * 100 : 0;
+  const status = monthlyStatusInfo(percent, totals.venda);
+  const showStock = network === 'COSTA';
+
+  els.monthlySummaryBody.innerHTML = `
+    <div class="monthly-store-title">
+      <div><p class="eyebrow">${escapeHtml(network)}</p><h4>${escapeHtml(store)}</h4></div>
+      <span class="status-badge ${status.className}">${status.label}</span>
+    </div>
+    <div class="monthly-kpi-grid">
+      <div class="monthly-kpi"><span>Venda no mês</span><strong>${formatCurrency(totals.venda)}</strong></div>
+      <div class="monthly-kpi"><span>Quebra no mês</span><strong>${formatCurrency(totals.quebra)}</strong></div>
+      <div class="monthly-kpi"><span>% Quebra</span><strong>${formatPercent(percent)}</strong></div>
+      <div class="monthly-kpi"><span>Semanas importadas</span><strong>${weeks.length}</strong></div>
+    </div>
+    <div class="monthly-store-detail-grid">
+      <article class="monthly-chart-panel"><div class="monthly-chart-head"><strong>Evolução semanal</strong><span>Venda × % de quebra</span></div><div class="monthly-chart-wrap"><canvas id="monthlyStoreTrendChart"></canvas></div></article>
+      <div class="table-wrap">
+        <table class="monthly-week-table">
+          <thead><tr><th>Semana</th><th>Venda</th><th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>${showStock ? '<th>Estoque</th>' : ''}</tr></thead>
+          <tbody>${weeks.map(row => `<tr>
+            <td><strong>${escapeHtml(row.semana)}</strong></td><td>${formatCurrency(row.valorVenda)}</td><td>${formatCurrency(row.valorQuebra)}</td>
+            <td><strong>${formatPercent(row.percentualQuebra)}</strong></td><td>${row.hasFaltaData ? formatCurrency(row.valorFalta) : '—'}</td><td>${row.hasQualidadeData ? formatCurrency(row.valorQualidade) : '—'}</td>${showStock ? `<td>${row.hasEstoqueData ? formatCurrency(row.valorEstoque) : '—'}</td>` : ''}
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+  renderMonthlyStoreTrendChart(weeks);
+}
+
+function renderMonthlyStoreTrendChart(weeks) {
+  if (!window.Chart) return;
+  const canvas = document.getElementById('monthlyStoreTrendChart');
+  if (!canvas) return;
+  upsertChart('monthlyStoreTrend', canvas, {
+    data: {
+      labels: weeks.map(row => row.semana),
+      datasets: [
+        { type: 'bar', label: 'Venda', data: weeks.map(row => row.valorVenda), yAxisID: 'y', backgroundColor: 'rgba(54,210,124,0.55)', borderRadius: 8, maxBarThickness: 42 },
+        { type: 'line', label: '% Quebra', data: weeks.map(row => row.percentualQuebra), yAxisID: 'y1', borderColor: '#f4c84b', backgroundColor: '#f4c84b', pointRadius: 4, pointHoverRadius: 5, tension: 0.3, borderWidth: 3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#dbe8e0', usePointStyle: true } },
+        tooltip: { callbacks: { label: context => context.dataset.yAxisID === 'y1' ? `${context.dataset.label}: ${formatPercent(context.raw)}` : `${context.dataset.label}: ${formatCurrency(context.raw)}` } }
+      },
+      scales: {
+        x: { ticks: { color: '#b3c4bc' }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: '#b3c4bc', callback: value => compactCurrency(value) }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y1: { beginAtZero: true, position: 'right', ticks: { color: '#b3c4bc', callback: value => `${value}%` }, grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+}
+
+function destroyMonthlyStoreChart() {
+  if (appState.charts.monthlyStoreTrend) {
+    appState.charts.monthlyStoreTrend.destroy();
+    delete appState.charts.monthlyStoreTrend;
+  }
+}
+
+function handleMonthlySummaryClick(event) {
+  const networkButton = event.target.closest('[data-monthly-network]');
+  if (networkButton) {
+    appState.monthlyDrilldown = { network: networkButton.dataset.monthlyNetwork, store: '' };
+    renderMonthlySummary();
+    return;
+  }
+  const storeButton = event.target.closest('[data-monthly-store]');
+  if (storeButton) {
+    appState.monthlyDrilldown.store = storeButton.dataset.monthlyStore;
+    renderMonthlySummary();
+  }
+}
+
+function handleMonthlyBreadcrumbClick(event) {
+  const button = event.target.closest('[data-monthly-level]');
+  if (!button) return;
+  if (button.dataset.monthlyLevel === 'networks') appState.monthlyDrilldown = { network: '', store: '' };
+  if (button.dataset.monthlyLevel === 'stores') appState.monthlyDrilldown.store = '';
+  renderMonthlySummary();
+}
+
 function aggregateByNetwork(records) {
   const map = new Map();
   records.forEach(item => {
@@ -2109,7 +2751,9 @@ function getRowMeta(item) {
 }
 
 function getStoreMeta(rede, loja) {
-  const monthlyNetworkRecords = getDisplayRecords(appState.data).filter(record => record.rede === rede);
+  const monthKey = appState.filters.mes !== 'Todas' ? appState.filters.mes : getLatestImportMonthKey();
+  const source = monthKey ? getMonthlyNetworkBase(monthKey) : [...appState.data, ...appState.storeData];
+  const monthlyNetworkRecords = source.filter(record => record.rede === rede && !record.isNetworkTotalOnly);
   const uniqueStores = [...new Set(monthlyNetworkRecords.map(record => record.loja))].length || 1;
   return (appState.config.metasPorRede[rede] || 0) / uniqueStores;
 }
@@ -2119,11 +2763,17 @@ function aggregateRecords(records) {
   const quebra = records.reduce((sum, item) => sum + Number(item.valorQuebra || 0), 0);
   const falta = records.reduce((sum, item) => sum + Number(item.valorFalta || 0), 0);
   const qualidade = records.reduce((sum, item) => sum + Number(item.valorQualidade || 0), 0);
+  const hasFaltaData = records.length > 0 && records.every(item => item.hasFaltaData !== false);
+  const hasQualidadeData = records.length > 0 && records.every(item => item.hasQualidadeData !== false);
+  const hasEstoqueData = records.length > 0 && records.every(item => item.rede !== 'COSTA' || item.hasEstoqueData !== false);
   return {
     venda,
     quebra,
     falta,
     qualidade,
+    hasFaltaData,
+    hasQualidadeData,
+    hasEstoqueData,
     percQuebra: venda > 0 ? (quebra / venda) * 100 : 0
   };
 }
@@ -2400,6 +3050,44 @@ function renderImportBatchesTable() {
       </td>
     </tr>`;
   }).filter(Boolean).join('') : `<tr><td colspan="8">Nenhuma planilha anexada até o momento.</td></tr>`;
+}
+
+function renderStoreImportBatchesTable() {
+  if (!els.storeImportBatchesTableBody || !els.storeImportBatchCount) return;
+  const batches = [...appState.storeImports].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+  els.storeImportBatchCount.textContent = String(batches.length);
+  els.storeImportBatchesTableBody.innerHTML = batches.length ? batches.map(batch => {
+    const badgeClass = batch.verificationStatus === 'bad' ? 'conference-badge--bad' : 'conference-badge--ok';
+    const badgeText = batch.verificationStatus === 'bad' ? 'Divergência' : 'Conferido';
+    const networks = Array.isArray(batch.networks) ? batch.networks.join(', ') : `${batch.networkCount || 0} redes`;
+    return `<tr>
+      <td><div class="table-file"><strong>${escapeHtml(batch.fileName)}</strong><small>Base detalhada por loja</small></div></td>
+      <td>${escapeHtml(batch.periodLabel || batch.weekLabel || '—')}</td>
+      <td>${batch.recordCount || 0}</td>
+      <td>${escapeHtml(networks)}</td>
+      <td>${formatCurrency(batch.totalVenda || 0)}</td>
+      <td>${formatCurrency(batch.totalQuebra || 0)}</td>
+      <td><span class="conference-badge ${badgeClass}">${badgeText}</span></td>
+      <td><button type="button" class="btn btn--danger btn--sm" data-delete-store-batch="${batch.id}">Excluir</button></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="8">Nenhuma planilha por loja importada até o momento.</td></tr>';
+}
+
+function handleStoreImportBatchAction(event) {
+  const button = event.target.closest('[data-delete-store-batch]');
+  if (!button) return;
+  const batchId = button.dataset.deleteStoreBatch;
+  const batch = appState.storeImports.find(item => item.id === batchId);
+  if (!batch) return;
+  const confirmed = window.confirm(`Excluir a base por loja "${batch.fileName}" e remover o detalhamento desse período?`);
+  if (!confirmed) return;
+  appState.storeImports = appState.storeImports.filter(item => item.id !== batchId);
+  appState.storeData = appState.storeData.filter(item => item.sourceBatchId !== batchId);
+  appState.monthlyDrilldown = { network: '', store: '' };
+  appState.config.ultimaAtualizacao = new Date().toISOString();
+  persistLocal();
+  refreshAll();
+  setStoreImportFeedback(`Base por loja ${batch.fileName} excluída com sucesso.`, false);
 }
 
 function handleImportBatchAction(event) {

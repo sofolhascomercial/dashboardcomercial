@@ -178,6 +178,24 @@
         </article>
       </section>
 
+
+      <section id="monthlyDrilldownSection" class="card monthly-drilldown-card">
+        <div class="section-head section-head--stack-mobile monthly-drilldown-head">
+          <div>
+            <p class="eyebrow">Resumo mensal interativo</p>
+            <h3>Redes → lojas → semanas</h3>
+            <p class="section-note">Clique em uma rede para abrir as lojas. Depois, clique em uma loja para acompanhar o resultado semana a semana.</p>
+            <p class="section-note monthly-history-note"><strong>Histórico carregado:</strong> janeiro/2026 até a 3ª semana de agosto/2026. Na planilha do ASSAÍ, o detalhamento semanal disponível começa em junho/2026.</p>
+          </div>
+          <div class="monthly-period-box">
+            <span>Período</span>
+            <strong id="monthlySummaryPeriod">—</strong>
+          </div>
+        </div>
+        <div id="monthlyBreadcrumbs" class="monthly-breadcrumbs"></div>
+        <div id="monthlySummaryBody" class="monthly-summary-body"></div>
+      </section>
+
       <section class="charts-grid">
         <article class="card chart-card chart-card--wide">
           <div class="section-head">
@@ -381,7 +399,7 @@
         <div class="adm-shell">
           <nav class="adm-nav" aria-label="Seções administrativas">
             <button type="button" class="adm-nav__item is-active" data-adm-tab="metas">Metas</button>
-            <button type="button" class="adm-nav__item" data-adm-tab="importacao">Carregar planilha</button>
+            <button type="button" class="adm-nav__item" data-adm-tab="importacao">Importações</button>
             <button type="button" class="adm-nav__item" data-adm-tab="historico">Histórico</button>
             <button type="button" class="adm-nav__item" data-adm-tab="registros">Registros</button>
           </nav>
@@ -402,49 +420,83 @@
             </section>
 
             <section class="adm-panel" data-adm-panel="importacao" hidden>
-              <section class="card admin-card">
-                <div class="section-head">
-                  <h4>Importação Excel</h4>
-                </div>
-                <div class="admin-grid admin-grid--period">
-                  <div class="field">
-                    <label for="monthInput">Mês da planilha</label>
-                    <select id="monthInput">
-                      <option value="">Selecionar mês</option>
-                      <option value="01">Janeiro</option>
-                      <option value="02">Fevereiro</option>
-                      <option value="03">Março</option>
-                      <option value="04">Abril</option>
-                      <option value="05">Maio</option>
-                      <option value="06">Junho</option>
-                      <option value="07">Julho</option>
-                      <option value="08">Agosto</option>
-                      <option value="09">Setembro</option>
-                      <option value="10">Outubro</option>
-                      <option value="11">Novembro</option>
-                      <option value="12">Dezembro</option>
-                    </select>
+              <div class="import-mode-grid">
+                <section class="card admin-card import-mode-card">
+                  <div class="import-mode-card__head">
+                    <div class="import-mode-icon">R</div>
+                    <div>
+                      <p class="eyebrow">Base executiva</p>
+                      <h4>Importação por Rede</h4>
+                      <p class="section-note">Alimenta o resumo geral, totais por rede, metas, rankings e indicadores executivos.</p>
+                    </div>
+                  </div>
+                  <div class="admin-grid admin-grid--period">
+                    <div class="field">
+                      <label for="monthInput">Mês da planilha</label>
+                      <select id="monthInput">
+                        <option value="">Selecionar mês</option>
+                        <option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option>
+                        <option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option>
+                        <option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option>
+                        <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="weekInput">Semana do mês</label>
+                      <select id="weekInput">
+                        <option value="">Selecionar semana</option>
+                        <option value="1ª semana">1ª semana</option><option value="2ª semana">2ª semana</option>
+                        <option value="3ª semana">3ª semana</option><option value="4ª semana">4ª semana</option><option value="5ª semana">5ª semana</option>
+                      </select>
+                    </div>
                   </div>
                   <div class="field">
-                    <label for="weekInput">Semana do mês</label>
-                    <select id="weekInput">
-                      <option value="">Selecionar semana</option>
-                      <option value="1ª semana">1ª semana</option>
-                      <option value="2ª semana">2ª semana</option>
-                      <option value="3ª semana">3ª semana</option>
-                      <option value="4ª semana">4ª semana</option>
-                      <option value="5ª semana">5ª semana</option>
-                    </select>
+                    <label for="excelFileInput">Planilha semanal por rede</label>
+                    <input id="excelFileInput" type="file" accept=".xlsx,.xls" />
                   </div>
-                </div>
-                <div class="field">
-                  <label for="excelFileInput">Planilha semanal</label>
-                  <input id="excelFileInput" type="file" accept=".xlsx,.xls" />
-                </div>
-                <button id="importExcelBtn" class="btn btn--primary" type="button">Importar planilha</button>
-                <p class="helper">Cada planilha semanal deve ser vinculada ao mês e à semana correspondente. O sistema soma os dados importados, usa a última linha apenas para conferência e mantém o histórico para comparativos por período.</p>
-                <p id="importFeedback" class="feedback"></p>
-              </section>
+                  <button id="importExcelBtn" class="btn btn--primary" type="button">Importar por Rede</button>
+                  <p class="helper">Se o mesmo mês e semana forem importados novamente, a base anterior desse período é substituída para evitar duplicidade.</p>
+                  <p id="importFeedback" class="feedback"></p>
+                </section>
+
+                <section class="card admin-card import-mode-card import-mode-card--store">
+                  <div class="import-mode-card__head">
+                    <div class="import-mode-icon">L</div>
+                    <div>
+                      <p class="eyebrow">Detalhamento operacional</p>
+                      <h4>Importação por Loja</h4>
+                      <p class="section-note">Alimenta o Resumo Mensal interativo: rede → lojas → resultado semanal de cada loja.</p>
+                    </div>
+                  </div>
+                  <div class="admin-grid admin-grid--period">
+                    <div class="field">
+                      <label for="storeMonthInput">Mês da planilha</label>
+                      <select id="storeMonthInput">
+                        <option value="">Selecionar mês</option>
+                        <option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option>
+                        <option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option>
+                        <option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option>
+                        <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="storeWeekInput">Semana do mês</label>
+                      <select id="storeWeekInput">
+                        <option value="">Selecionar semana</option>
+                        <option value="1ª semana">1ª semana</option><option value="2ª semana">2ª semana</option>
+                        <option value="3ª semana">3ª semana</option><option value="4ª semana">4ª semana</option><option value="5ª semana">5ª semana</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="storeExcelFileInput">Planilha semanal por loja</label>
+                    <input id="storeExcelFileInput" type="file" accept=".xlsx,.xls" />
+                  </div>
+                  <button id="importStoreExcelBtn" class="btn btn--primary" type="button">Importar por Loja</button>
+                  <p class="helper">Modelo reconhecido: abas por rede com uma linha por loja e uma linha “Total” para conferência. O arquivo BASE DASH POR LOJAS já segue esse padrão.</p>
+                  <p id="storeImportFeedback" class="feedback"></p>
+                </section>
+              </div>
             </section>
 
             <section class="adm-panel" data-adm-panel="historico" hidden>
@@ -474,6 +526,27 @@
                       </tr>
                     </thead>
                     <tbody id="importBatchesTableBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-card admin-card--full store-history-card">
+                <div class="section-head section-head--stack-mobile">
+                  <div>
+                    <h4>Histórico do detalhamento por loja</h4>
+                    <p class="section-note">Estas bases alimentam exclusivamente o drill-down mensal de rede → loja → semanas.</p>
+                  </div>
+                  <div>
+                    <p class="card-label">Planilhas por loja</p>
+                    <strong id="storeImportBatchCount">0</strong>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr><th>Arquivo</th><th>Período</th><th>Registros</th><th>Redes</th><th>Venda</th><th>Quebra</th><th>Status</th><th>Ação</th></tr>
+                    </thead>
+                    <tbody id="storeImportBatchesTableBody"></tbody>
                   </table>
                 </div>
               </section>
@@ -544,6 +617,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
-  <script src="script.js?v=20260830-fix-assai"></script>
+  <script src="historico-2026.js?v=20260830-historico-v1"></script>
+  <script src="script.js?v=20260830-historico-v1"></script>
 </body>
 </html>

@@ -1,32 +1,35 @@
-DASHBOARD COMERCIAL SÓ FOLHAS — CORREÇÃO 30/08/2026
+DASHBOARD COMERCIAL SÓ FOLHAS — HISTÓRICO JAN/2026 A AGO/2026 (3ª SEMANA)
 
-Arquivos para substituir no servidor:
+ARQUIVOS PARA SUBIR:
 - index.html
 - script.js
 - style.css
 - firebase-config.js
+- historico-2026.js
+- manter a pasta assets já existente no servidor
 
-Mantenha a pasta assets/ já existente no servidor (ela contém a logo e outros recursos).
+O QUE JÁ VAI ALIMENTADO
+- COSTA: janeiro até 3ª semana de agosto/2026
+- VIVENDAS: janeiro até 3ª semana de agosto/2026
+- COMPER/FORT: janeiro até 3ª semana de agosto/2026
+- DIA A DIA: janeiro até 3ª semana de agosto/2026
+- VARIADOS: janeiro até 3ª semana de agosto/2026
+- ASSAÍ: detalhamento semanal disponível na fonte de junho até 3ª semana de agosto/2026
 
-Depois de subir os arquivos:
-1. Abra o sistema e entre no ADM.
-2. Reimporte AGOSTO na ordem: 1ª semana, 2ª semana e 3ª semana.
-3. Se já existir uma importação do mesmo mês/semana, o sistema agora substitui o período em vez de somar novamente.
+ORIGEM
+O histórico foi montado exclusivamente a partir das tabelas de reunião fornecidas:
+- COSTA REUNIÃO.xlsx
+- VIVENDAS REUNIÃO(1).xlsx
+- REUNIÃO DOS CONSIGNADOS - VARIADOS.xlsx
+- TABELA G.P REUNIÃO.xlsx
+- TABELA DIA A DIA REUNIAO.xlsx
+- VENDA ASSAÍ(1).xlsx
 
-Correções incluídas:
-- ASSAÍ passa a ler VENDA, QUEBRA e PERCENTUAL.
-- Quebra real/parcial não soma DEV. FALTA e DEV. QUALIDADE.
-- Conferência automática passa a validar a quebra do ASSAÍ.
-- NOSSA KAZA entra pelo consolidado SÓ FOLHAS TOTAL quando não houver aba detalhada.
-- Estoque COSTA acumula corretamente as semanas no consolidado mensal.
-- Fechamento parcial COSTA Agosto/2026 (1ª a 3ª semana) conciliado para R$ 1.120.832,00 de venda.
-- Reimportação da mesma semana substitui a base anterior e evita duplicidade.
-
-Valores de controle esperados após reimportar as 3 semanas:
-- Venda total: R$ 3.927.931,57
-- Quebra real: R$ 548.896,62
-- Falta: R$ 63.255,43
-- Qualidade: R$ 19.777,76
-- Estoque COSTA: R$ 99.593,74
-- Quebra geral: 13,97%
-- ASSAÍ: Venda R$ 233.702,20 | Quebra R$ 32.898,80 | 14,08%
+REGRAS IMPORTANTES
+1. O histórico entra automaticamente uma única vez e é salvo no Firebase/localStorage.
+2. No primeiro carregamento desta versão, os registros históricos fornecidos substituem registros do mesmo mês + semana + rede + loja.
+3. Depois dessa migração, novas importações pelo ADM prevalecem normalmente.
+4. Falta, Qualidade e Estoque aparecem como “—” no histórico quando essas informações não existem nas planilhas de reunião.
+5. ASSAÍ: janeiro a maio têm valores mensais no arquivo, porém não há detalhamento semanal nessa fonte. Esses meses NÃO foram inventados.
+6. VARIADOS: uma célula de agosto tinha fórmula externa quebrada (#NAME?). O valor semanal foi reconciliado usando o total mensal da própria planilha e as demais semanas, preservando o fechamento do arquivo.
+7. O Resumo Mensal permite: REDE → LOJAS → SEMANAS.
