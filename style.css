@@ -1656,3 +1656,29 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
   .monthly-subsummary--sales-only,
   .monthly-kpi-grid--sales-only { grid-template-columns: 1fr; }
 }
+
+
+/* V8 — Metas mensais */
+.monthly-goals-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+}
+.monthly-goal-year {
+  max-width: 260px;
+}
+.monthly-goal-field input:placeholder-shown {
+  opacity: .78;
+}
+.admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+@media (max-width: 980px) {
+  .monthly-goals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .monthly-goals-grid { grid-template-columns: 1fr; }
+}
