@@ -88,3 +88,12 @@ CORREÇÃO V9 — INICIALIZAÇÃO
 - Firebase agora sincroniza em segundo plano e não bloqueia filtros, ADM ou botões.
 - Preserva Metas Mensais e histórico completo da V7/V8.
 - Após publicar, substitua todos os arquivos do ZIP e faça Ctrl+F5.
+
+
+VERSÃO V10 — CORREÇÃO DE DUPLICIDADE
+- Corrige o resumo geral de Agosto para R$ 3.927.931,57 de venda e 13,97% de quebra.
+- Remove a dupla contagem de NOSSA KAZA (R$ 157.128,00).
+- O detalhamento por loja passa a ter prioridade no consolidado quando disponível.
+- Importação por rede continua sendo usada como complemento quando uma rede ainda não possui detalhamento.
+- A carga histórica é reconciliada após sincronização com Firebase para impedir que snapshot antigo reintroduza duplicidades.
+- Metas mensais permanecem no ADM; quando não cadastradas, a venda e a quebra continuam aparecendo normalmente.

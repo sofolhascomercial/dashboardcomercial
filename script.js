@@ -15,8 +15,8 @@ const ADM_CREDENTIALS = {
   password: 'sofolhas2026'
 };
 
-const STORAGE_KEY = 'sofolhas-dashboard-v9';
-const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v8', 'sofolhas-dashboard-v7', 'sofolhas-dashboard-v6'];
+const STORAGE_KEY = 'sofolhas-dashboard-v10';
+const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v9', 'sofolhas-dashboard-v8', 'sofolhas-dashboard-v7', 'sofolhas-dashboard-v6'];
 const HISTORY_SEED_VERSION = 'historico-2026-jan-ago3-completo-v2';
 const BREAK_LIMIT = 12;
 const WARNING_LIMIT = 10;
@@ -525,19 +525,28 @@ function mergePreloadedHistory() {
   const seed = window.__SOFOLHAS_PRELOADED_HISTORY__;
   if (!seed || !Array.isArray(seed.records) || !seed.records.length) return false;
   const version = String(seed.version || HISTORY_SEED_VERSION);
-  if (appState.config.historySeedVersion === version) return false;
 
   const seededRecords = seed.records.map(normalizeStoredStoreRecord);
   const seededKeys = new Set(seededRecords.map(historyRecordKey).filter(Boolean));
 
-  // Na primeira migração, a base histórica fornecida substitui registros do
-  // mesmo mês + semana + rede + loja. Depois disso, novas importações do ADM
-  // prevalecem, porque a versão da migração fica salva no Firebase/localStorage.
+  // Sempre reconcilia a carga histórica embarcada. Isso impede que um snapshot
+  // remoto antigo do Firebase volte a inserir registros históricos duplicados.
+  // Importações manuais feitas pelo ADM continuam prevalecendo sobre a carga
+  // embarcada quando possuem a mesma chave mês + semana + rede + loja.
+  const manualOverrideKeys = new Set(
+    appState.storeData
+      .filter(item => item && !item.historySource && !item.isPreloadedHistory)
+      .map(historyRecordKey)
+      .filter(key => key && seededKeys.has(key))
+  );
+
   appState.storeData = appState.storeData.filter(item => {
-    if (item?.historySource) return false;
-    return !seededKeys.has(historyRecordKey(item));
+    const key = historyRecordKey(item);
+    if (item?.historySource || item?.isPreloadedHistory) return !seededKeys.has(key);
+    return true;
   });
-  appState.storeData.push(...seededRecords);
+
+  appState.storeData.push(...seededRecords.filter(item => !manualOverrideKeys.has(historyRecordKey(item))));
 
   const seedBatches = (seed.batches || []).map(normalizeStoredImport);
   const seedBatchIds = new Set(seedBatches.map(item => item.id));
@@ -547,8 +556,7 @@ function mergePreloadedHistory() {
   ].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
 
   appState.config.historySeedVersion = version;
-  appState.config.historySeededAt = new Date().toISOString();
-  appState.config.ultimaAtualizacao = new Date().toISOString();
+  if (!appState.config.historySeededAt) appState.config.historySeededAt = new Date().toISOString();
   if (!appState.config.ultimaImportacao) appState.config.ultimaImportacao = seed.generatedAt || new Date().toISOString();
   return true;
 }
@@ -2536,13 +2544,21 @@ function getMonthlySummaryMonthKey() {
 }
 
 function getMonthlyNetworkBase(monthKey) {
-  const official = appState.data.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey);
-  const officialNetworks = new Set(official.map(item => item.rede));
-  const fallback = appState.storeData.filter(item => {
+  // Quando existe detalhamento por loja para uma rede/mês, ele é a fonte
+  // principal do consolidado. A importação por rede entra apenas para redes
+  // que ainda não possuem detalhamento. Isso evita dupla contagem (ex.:
+  // NOSSA KAZA já separada do antigo bloco VARIADOS).
+  const detailed = appState.storeData.filter(item =>
+    (item.monthKey || inferRecordMonthKey(item)) === monthKey
+  );
+  const detailedNetworks = new Set(detailed.map(item => item.rede));
+
+  const networkOnlyFallback = appState.data.filter(item => {
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
-    return sameMonth && !officialNetworks.has(item.rede);
+    return sameMonth && !detailedNetworks.has(item.rede);
   });
-  return [...official, ...fallback];
+
+  return [...detailed, ...networkOnlyFallback];
 }
 
 function getMonthlyStoreBase(monthKey, network = '') {
