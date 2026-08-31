@@ -1261,8 +1261,11 @@ function parseStoreDetailSheet({ network, sheetName, rows, batchId, fileName, im
     const qualidade = parseMoney(getFlexibleCell(row, [['DEV', 'QUALIDADE'], ['QUALIDADE']]));
     const estoque = parseMoney(getFlexibleCell(row, [['ESTOQUE', 'EM', 'LOJA'], ['ESTOQUE', 'LOJA'], ['ESTOQUE']]));
     const recebido = parseMoney(getFlexibleCell(row, [['RECEBIDO']]));
-    const quebra = parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA']]));
-    const percentualQuebra = venda > 0 ? Number(((quebra / venda) * 100).toFixed(2)) : 0;
+    const hasBreakData = rowHasFlexibleHeader(row, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA', 'TOTAL'], ['QUEBRA']]);
+    const quebra = hasBreakData
+      ? parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA', 'TOTAL'], ['QUEBRA']]))
+      : 0;
+    const percentualQuebra = hasBreakData && venda > 0 ? Number(((quebra / venda) * 100).toFixed(2)) : 0;
 
     return {
       id: `${batchId}-${slugify(rede)}-${slugify(store)}-${index + 1}`,
@@ -1288,7 +1291,8 @@ function parseStoreDetailSheet({ network, sheetName, rows, batchId, fileName, im
       percentualQuebra,
       percentualFalta: venda > 0 ? Number(((falta / venda) * 100).toFixed(2)) : 0,
       percentualQualidade: venda > 0 ? Number(((qualidade / venda) * 100).toFixed(2)) : 0,
-      statusQuebra: getBreakStatus(percentualQuebra).label,
+      statusQuebra: hasBreakData ? getBreakStatus(percentualQuebra).label : 'Venda apenas',
+      hasBreakData,
       dataImportacao: importedAt,
       modeloImportacao: 'STORE_DETAIL'
     };
@@ -1469,6 +1473,7 @@ function parseDataWorksheet({ sheetName, rows, batchId, fileName, importedAt, we
     if (!originalStore) return null;
     let rede = networkFromSheet || normalizeNetworkName(String(getFlexibleCell(row, [['REDE']]) || '').trim()) || inferNetworkByStore(originalStore) || 'VARIADOS';
     let venda = 0, falta = 0, qualidade = 0, quebraOperacional = 0, estoque = 0, percentualQuebra = 0;
+    const hasBreakData = rowHasFlexibleHeader(row, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA', 'TOTAL'], ['VALOR', 'QUEBRA'], ['QUEBRA']]);
 
     if (model === 'DIA_A_DIA') {
       rede = 'ATACADÃO DIA A DIA'; venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
@@ -1535,7 +1540,7 @@ function parseDataWorksheet({ sheetName, rows, batchId, fileName, importedAt, we
       valorFalta: Number(falta.toFixed(2)), valorQualidade: Number(qualidade.toFixed(2)), valorEstoque: rede === 'COSTA' ? Number(estoque.toFixed(2)) : 0,
       percentualQuebra: Number((percentualQuebra || 0).toFixed(2)), percentualFalta: venda > 0 ? Number(((falta / venda) * 100).toFixed(2)) : 0,
       percentualQualidade: venda > 0 ? Number(((qualidade / venda) * 100).toFixed(2)) : 0,
-      statusQuebra: getBreakStatus(percentualQuebra).label, dataImportacao: importedAt, modeloImportacao: model || 'GENERICO'
+      statusQuebra: hasBreakData ? getBreakStatus(percentualQuebra).label : 'Venda apenas', hasBreakData, dataImportacao: importedAt, modeloImportacao: model || 'GENERICO'
     };
   }).filter(Boolean);
   return { records, verification: buildSheetVerification(sheetName, records, totalRow) };
@@ -1686,8 +1691,16 @@ function getFilteredData() {
     ? appState.filters.mes
     : getLatestImportMonthKey();
 
-  let source = requestedMonth ? getMonthlyNetworkBase(requestedMonth) : [...appState.data];
-  if (!source.length && appState.storeData.length) source = [...appState.storeData];
+  let source = [];
+  if (requestedMonth && appState.filters.loja !== 'Todas') {
+    source = getMonthlyStoreBase(
+      requestedMonth,
+      appState.filters.rede !== 'Todas' ? appState.filters.rede : ''
+    );
+  } else {
+    source = requestedMonth ? getMonthlyNetworkBase(requestedMonth) : [...appState.data];
+    if (!source.length && appState.storeData.length) source = [...appState.storeData];
+  }
 
   return source.filter(item => {
     const monthKey = item.monthKey || inferRecordMonthKey(item);
@@ -1755,7 +1768,7 @@ function aggregateByStore(records) {
 }
 
 function getRankingStatus(value, hasBreak = true) {
-  if (!hasBreak) return { label: 'Sem quebra', className: 'status--neutral' };
+  if (!hasBreak) return { label: 'Venda apenas', className: 'status--neutral' };
   if (value <= WARNING_LIMIT) return { label: '0% a 10%', className: 'status--good' };
   if (value <= BREAK_LIMIT) return { label: '10% a 12%', className: 'status--warn' };
   return { label: 'Acima de 12%', className: 'status--bad' };
@@ -1764,6 +1777,10 @@ function getRankingStatus(value, hasBreak = true) {
 function renderRankingTable(filtered) {
   const monthlyRecords = getDisplayRecords(filtered);
   const fullAggregated = aggregateByStore(monthlyRecords).sort((a, b) => {
+    const aHas = hasBreakTrackingForStore(a.rede, a.loja);
+    const bHas = hasBreakTrackingForStore(b.rede, b.loja);
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    if (!aHas && !bHas) return b.valorVenda - a.valorVenda;
     const aScore = Number(a.percentualQuebra || 0);
     const bScore = Number(b.percentualQuebra || 0);
     return aScore - bScore || b.valorVenda - a.valorVenda;
@@ -1776,28 +1793,30 @@ function renderRankingTable(filtered) {
 
   renderRankingHighlights(aggregated);
   renderRankingPositivePanel(aggregated);
-  const maxBreak = Math.max(...aggregated.map(item => Number(item.percentualQuebra || 0)), BREAK_LIMIT, 1);
+  const breakItems = aggregated.filter(item => hasBreakTrackingForStore(item.rede, item.loja));
+  const maxBreak = Math.max(...breakItems.map(item => Number(item.percentualQuebra || 0)), BREAK_LIMIT, 1);
 
   els.rankingTableBody.innerHTML = aggregated.length ? aggregated.map((item, index) => {
-    const rankingStatus = getRankingStatus(item.percentualQuebra, true);
-    const width = Math.max(8, Math.min(100, (Number(item.percentualQuebra || 0) / maxBreak) * 100));
-    return `<tr>
+    const hasBreak = hasBreakTrackingForStore(item.rede, item.loja);
+    const rankingStatus = getRankingStatus(item.percentualQuebra, hasBreak);
+    const width = hasBreak ? Math.max(8, Math.min(100, (Number(item.percentualQuebra || 0) / maxBreak) * 100)) : 0;
+    return `<tr class="${hasBreak ? '' : 'ranking-row--sales-only'}">
       <td class="ranking-col--index"><span class="ranking-index-badge">${index + 1}</span></td>
       <td><span class="ranking-network">${item.rede}</span></td>
       <td>
         <div class="ranking-store">
           <strong>${item.loja}</strong>
-          <span>${rankingStatus.label}</span>
+          <span>${hasBreak ? rankingStatus.label : 'Venda sem quebra informada'}</span>
         </div>
       </td>
       <td><span class="ranking-sale">${formatCurrency(item.valorVenda)}</span></td>
       <td class="ranking-break">
-        <div class="ranking-break__top">
+        ${hasBreak ? `<div class="ranking-break__top">
           <span class="ranking-break__value">${formatPercent(item.percentualQuebra)}</span>
         </div>
-        <div class="ranking-break__bar"><span class="ranking-break__fill" style="width:${width}%"></span></div>
+        <div class="ranking-break__bar"><span class="ranking-break__fill" style="width:${width}%"></span></div>` : '<span class="ranking-break__empty">—</span>'}
       </td>
-      <td><span class="status-badge ranking-badge ${rankingStatus.className}">${rankingStatus.label}</span></td>
+      <td>${hasBreak ? `<span class="status-badge ranking-badge ${rankingStatus.className}">${rankingStatus.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}</td>
     </tr>`;
   }).join('') : `<tr><td colspan="6">Nenhuma loja encontrada para montar o ranking.</td></tr>`;
 }
@@ -1826,28 +1845,42 @@ function renderRankingHighlights(aggregated) {
     return;
   }
 
-  const highestBreak = [...aggregated].sort((a, b) => Number(b.percentualQuebra || 0) - Number(a.percentualQuebra || 0) || b.valorVenda - a.valorVenda)[0];
+  const breakTracked = aggregated.filter(item => hasBreakTrackingForStore(item.rede, item.loja));
+  const highestBreak = breakTracked.length
+    ? [...breakTracked].sort((a, b) => Number(b.percentualQuebra || 0) - Number(a.percentualQuebra || 0) || b.valorVenda - a.valorVenda)[0]
+    : null;
   const highestSale = [...aggregated].sort((a, b) => b.valorVenda - a.valorVenda)[0];
-  const attentionCount = aggregated.filter(item => Number(item.percentualQuebra || 0) > BREAK_LIMIT).length;
+  const attentionCount = breakTracked.filter(item => Number(item.percentualQuebra || 0) > BREAK_LIMIT).length;
   const activeNetworkLabel = appState.rankingRede === 'Todas' ? 'todas as redes' : appState.rankingRede;
 
-  els.rankingHighlights.innerHTML = [
-    {
+  const cards = [];
+  if (highestBreak) {
+    cards.push({
       label: 'Maior quebra',
       value: highestBreak.loja,
       meta: `${formatPercent(highestBreak.percentualQuebra)} • ${highestBreak.rede}`
-    },
-    {
-      label: 'Maior venda no ranking',
-      value: highestSale.loja,
-      meta: `${formatCurrency(highestSale.valorVenda)} • ${highestSale.rede}`
-    },
-    {
+    });
+  }
+  cards.push({
+    label: 'Maior venda no ranking',
+    value: highestSale.loja,
+    meta: `${formatCurrency(highestSale.valorVenda)} • ${highestSale.rede}`
+  });
+  if (breakTracked.length) {
+    cards.push({
       label: 'Lojas acima de 12%',
       value: `${attentionCount} ${attentionCount === 1 ? 'loja' : 'lojas'}`,
       meta: `Monitoramento de ${activeNetworkLabel}`
-    }
-  ].map(card => `
+    });
+  } else {
+    cards.push({
+      label: 'Quebra',
+      value: 'Não informada',
+      meta: `Neste recorte, as lojas exibidas têm somente venda`
+    });
+  }
+
+  els.rankingHighlights.innerHTML = cards.map(card => `
     <div class="ranking-highlight">
       <span class="ranking-highlight__label">${card.label}</span>
       <strong class="ranking-highlight__value">${card.value}</strong>
@@ -1873,12 +1906,13 @@ function getPositiveHighlightSource(items) {
 
 function renderRankingPositivePanel(aggregated) {
   if (!els.rankingPositivePanel) return;
-  if (!aggregated.length) {
+  const breakTracked = (aggregated || []).filter(item => hasBreakTrackingForStore(item.rede, item.loja));
+  if (!breakTracked.length) {
     els.rankingPositivePanel.innerHTML = '';
     return;
   }
 
-  const highlightSource = getPositiveHighlightSource(aggregated);
+  const highlightSource = getPositiveHighlightSource(breakTracked);
   const bestStores = [...highlightSource.items]
     .sort((a, b) => {
       const diff = Number(a.percentualQuebra || 0) - Number(b.percentualQuebra || 0);
@@ -1916,7 +1950,7 @@ function renderRankingPositivePanel(aggregated) {
 
 function renderNetworkWinnersPanel(records) {
   if (!els.networkWinnersPanel) return;
-  const aggregated = aggregateByStore(records);
+  const aggregated = aggregateByStore(records).filter(item => hasBreakTrackingForStore(item.rede, item.loja));
   if (!aggregated.length) {
     els.networkWinnersPanel.innerHTML = '';
     return;
@@ -1977,22 +2011,36 @@ function renderTopInfo(filtered) {
   const totals = aggregateRecords(displayRecords);
   const metaTarget = resolveActiveMetaTarget(displayRecords);
   const metaPercent = metaTarget > 0 ? (totals.venda / metaTarget) * 100 : 0;
-  const quebraReal = Math.max(0, totals.quebra);
-  const percQuebraReal = totals.venda > 0 ? (quebraReal / totals.venda) * 100 : 0;
-  const status = getBreakStatus(percQuebraReal);
+  const hasBreak = hasBreakTrackingForRecords(displayRecords);
+  const quebraReal = hasBreak ? Math.max(0, totals.quebra) : 0;
+  const percQuebraReal = hasBreak && totals.venda > 0 ? (quebraReal / totals.venda) * 100 : 0;
+  const status = hasBreak ? getBreakStatus(percQuebraReal) : { label: 'Venda apenas', className: 'status--neutral' };
   const stockVisible = appState.filters.rede === 'COSTA';
   const totalStock = getLatestCostaStockTotal(displayRecords);
+
   if (els.lastUpdateText) els.lastUpdateText.textContent = `Última atualização: ${formatDateTime(appState.config.ultimaAtualizacao)}`;
-  els.metaPercent.textContent = `${metaPercent.toFixed(0)}%`; els.metaPercentInner.textContent = `${metaPercent.toFixed(0)}%`;
+  els.metaPercent.textContent = `${metaPercent.toFixed(0)}%`;
+  els.metaPercentInner.textContent = `${metaPercent.toFixed(0)}%`;
   els.metaLegend.textContent = `Venda atual ${formatCurrency(totals.venda)} de ${formatCurrency(metaTarget)}`;
-  els.metaTotalValue.textContent = formatCurrency(metaTarget); els.salesTotalValue.textContent = formatCurrency(totals.venda); els.lastImportValue.textContent = formatDateTime(appState.config.ultimaImportacao);
-  els.cardVenda.textContent = formatCurrency(totals.venda); els.cardQuebra.textContent = formatCurrency(totals.quebra); els.cardPercQuebra.textContent = formatPercent(percQuebraReal);
-  els.cardFalta.textContent = totals.hasFaltaData ? formatCurrency(totals.falta) : '—';
-  els.cardQualidade.textContent = totals.hasQualidadeData ? formatCurrency(totals.qualidade) : '—';
-  els.cardStatusQuebra.textContent = formatCurrency(quebraReal);
-  els.breakRealValue.textContent = formatPercent(percQuebraReal); els.breakStatusBadge.textContent = status.label; els.breakStatusBadge.className = `status-badge ${status.className}`;
-  els.stockCard.hidden = !stockVisible; if (stockVisible) els.cardEstoque.textContent = totals.hasEstoqueData ? formatCurrency(totalStock) : '—';
-  updateProgressCircle(metaPercent); updateViewHeader(displayRecords, totals);
+  els.metaTotalValue.textContent = formatCurrency(metaTarget);
+  els.salesTotalValue.textContent = formatCurrency(totals.venda);
+  els.lastImportValue.textContent = formatDateTime(appState.config.ultimaImportacao);
+
+  els.cardVenda.textContent = formatCurrency(totals.venda);
+  els.cardQuebra.textContent = hasBreak ? formatCurrency(totals.quebra) : '—';
+  els.cardPercQuebra.textContent = hasBreak ? formatPercent(percQuebraReal) : '—';
+  els.cardFalta.textContent = hasBreak && totals.hasFaltaData ? formatCurrency(totals.falta) : '—';
+  els.cardQualidade.textContent = hasBreak && totals.hasQualidadeData ? formatCurrency(totals.qualidade) : '—';
+  els.cardStatusQuebra.textContent = hasBreak ? formatCurrency(quebraReal) : '—';
+  els.breakRealValue.textContent = hasBreak ? formatPercent(percQuebraReal) : '—';
+  els.breakStatusBadge.textContent = status.label;
+  els.breakStatusBadge.className = `status-badge ${status.className}`;
+
+  els.stockCard.hidden = !stockVisible;
+  if (stockVisible) els.cardEstoque.textContent = totals.hasEstoqueData ? formatCurrency(totalStock) : '—';
+
+  updateProgressCircle(metaPercent);
+  updateViewHeader(displayRecords, totals);
 }
 
 function renderSummaryTable(filtered) {
@@ -2009,33 +2057,37 @@ function renderSummaryTable(filtered) {
         <td>${formatCurrency(0)}</td>
         <td>${formatCurrency(appState.config.metasPorRede[networkId] || 0)}</td>
         <td>0%</td>
-        <td>${formatCurrency(0)}</td>
-        <td>0%</td>
+        <td>—</td>
+        <td>—</td>
         <td><span class="status-badge status--neutral">Sem dados</span></td>
       </tr>`;
     }
     const totals = aggregateRecords(records);
     const meta = appState.config.metasPorRede[networkId] || 0;
     const percentMeta = meta > 0 ? (totals.venda / meta) * 100 : 0;
-    const status = getBreakStatus(totals.percQuebra);
+    const hasBreak = hasBreakTrackingForRecords(records);
+    const status = hasBreak ? getBreakStatus(totals.percQuebra) : { label: 'Venda apenas', className: 'status--neutral' };
     return `<tr>
       <td>${networkId}</td>
       <td>${formatCurrency(totals.venda)}</td>
       <td>${formatCurrency(meta)}</td>
       <td>${percentMeta.toFixed(0)}%</td>
-      <td>${formatCurrency(totals.quebra)}</td>
-      <td>${formatPercent(totals.percQuebra)}</td>
-      <td><span class="status-badge ${status.className}">${status.label}</span></td>
+      <td>${hasBreak ? formatCurrency(totals.quebra) : '—'}</td>
+      <td>${hasBreak ? formatPercent(totals.percQuebra) : '—'}</td>
+      <td>${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}</td>
     </tr>`;
-  }).filter(Boolean);
+  }).filter(Boolean).join('');
 }
 
 function renderDetailsTable(filtered) {
   const hasWeekFilter = appState.filters.semana !== 'Todas';
   const monthlyRecords = getDisplayRecords(filtered);
   const detailBase = monthlyRecords.filter(item => !item.isNetworkTotalOnly);
-  const recordsForDetails = appState.detailsRede !== 'Todas' ? detailBase.filter(item => item.rede === appState.detailsRede) : detailBase;
+  const recordsForDetails = appState.detailsRede !== 'Todas'
+    ? detailBase.filter(item => item.rede === appState.detailsRede)
+    : detailBase;
   const showStock = shouldShowStock(recordsForDetails);
+  const contextHasBreak = hasBreakTrackingForRecords(recordsForDetails);
 
   if (hasWeekFilter) {
     els.detailsTableTitle.textContent = 'Resultados semanais por loja';
@@ -2048,37 +2100,38 @@ function renderDetailsTable(filtered) {
       <th>Meta</th>
       <th>% Meta</th>
       ${showStock ? '<th>Estoque</th>' : ''}
-      <th>Quebra</th>
-      <th>Falta</th>
-      <th>Qualidade</th>
-      <th>% Quebra</th>
-      <th>Status</th>`;
+      ${contextHasBreak ? '<th>Quebra</th><th>Falta</th><th>Qualidade</th><th>% Quebra</th><th>Status</th>' : ''}`;
 
     els.detailsTableBody.innerHTML = recordsForDetails.length ? recordsForDetails.map(item => {
       const meta = getRowMeta(item);
       const percentMeta = meta > 0 ? (item.valorVenda / meta) * 100 : 0;
-      const status = getBreakStatus(item.percentualQuebra);
-      return `<tr>
+      const hasBreak = hasBreakTrackingForStore(item.rede, item.loja);
+      const status = hasBreak ? getBreakStatus(item.percentualQuebra) : { label: 'Venda apenas', className: 'status--neutral' };
+      return `<tr class="${hasBreak ? '' : 'details-row--sales-only'}">
         <td>${item.rede}</td>
-        <td>${item.loja}</td>
+        <td>${item.loja}${!hasBreak && contextHasBreak ? '<br><span class="sales-only-label">Venda apenas</span>' : ''}</td>
         <td>${item.semana}</td>
         <td>${formatCurrency(item.valorVenda)}</td>
         <td>${formatCurrency(meta)}</td>
         <td>${percentMeta.toFixed(0)}%</td>
         ${showStock ? `<td>${item.hasEstoqueData === false ? '—' : formatCurrency(item.valorEstoque)}</td>` : ''}
-        <td>${formatCurrency(item.valorQuebra)}</td>
-        <td>${item.hasFaltaData === false ? '—' : formatCurrency(item.valorFalta)}</td>
-        <td>${item.hasQualidadeData === false ? '—' : formatCurrency(item.valorQualidade)}</td>
-        <td>${formatPercent(item.percentualQuebra)}</td>
-        <td><span class="status-badge ${status.className}">${status.label}</span></td>
+        ${contextHasBreak ? `
+          <td>${hasBreak ? formatCurrency(item.valorQuebra) : '—'}</td>
+          <td>${hasBreak && item.hasFaltaData !== false ? formatCurrency(item.valorFalta) : '—'}</td>
+          <td>${hasBreak && item.hasQualidadeData !== false ? formatCurrency(item.valorQualidade) : '—'}</td>
+          <td>${hasBreak ? formatPercent(item.percentualQuebra) : '—'}</td>
+          <td>${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '—'}</td>` : ''}
       </tr>`;
-    }).join('') : `<tr><td colspan="${showStock ? 12 : 11}">Nenhum registro semanal encontrado para os filtros selecionados.</td></tr>`;
+    }).join('') : `<tr><td colspan="${6 + (showStock ? 1 : 0) + (contextHasBreak ? 5 : 0)}">Nenhum registro semanal encontrado para os filtros selecionados.</td></tr>`;
     return;
   }
 
   const aggregated = aggregateByStore(recordsForDetails).sort((a, b) => a.rede.localeCompare(b.rede) || b.valorVenda - a.valorVenda);
   els.detailsTableTitle.textContent = 'Acumulado mensal por loja';
-  els.detailsTableSubtitle.textContent = appState.filters.mes !== 'Todas' ? `Exibe o acumulado de ${formatMonthFilterLabel(appState.filters.mes)}. Para ver semana a semana, aplique o filtro de semana.` : 'Exibe o acumulado do mês da última importação. Para ver semana a semana, aplique o filtro de semana.';
+  els.detailsTableSubtitle.textContent = appState.filters.mes !== 'Todas'
+    ? `Exibe o acumulado de ${formatMonthFilterLabel(appState.filters.mes)}. Para ver semana a semana, aplique o filtro de semana.`
+    : 'Exibe o acumulado do mês da última importação. Para ver semana a semana, aplique o filtro de semana.';
+
   els.detailsTableHeadRow.innerHTML = `
     <th>Rede</th>
     <th>Loja</th>
@@ -2086,30 +2139,28 @@ function renderDetailsTable(filtered) {
     <th>Meta</th>
     <th>% Meta</th>
     ${showStock ? '<th>Estoque atual</th>' : ''}
-    <th>Quebra</th>
-    <th>Falta</th>
-    <th>Qualidade</th>
-    <th>% Quebra</th>
-    <th>Status</th>`;
+    ${contextHasBreak ? '<th>Quebra</th><th>Falta</th><th>Qualidade</th><th>% Quebra</th><th>Status</th>' : ''}`;
 
   els.detailsTableBody.innerHTML = aggregated.length ? aggregated.map(item => {
     const meta = getStoreMeta(item.rede, item.loja);
     const percentMeta = meta > 0 ? (item.valorVenda / meta) * 100 : 0;
-    const status = getBreakStatus(item.percentualQuebra);
-    return `<tr>
+    const hasBreak = hasBreakTrackingForStore(item.rede, item.loja);
+    const status = hasBreak ? getBreakStatus(item.percentualQuebra) : { label: 'Venda apenas', className: 'status--neutral' };
+    return `<tr class="${hasBreak ? '' : 'details-row--sales-only'}">
       <td>${item.rede}</td>
-      <td>${item.loja}</td>
+      <td>${item.loja}${!hasBreak && contextHasBreak ? '<br><span class="sales-only-label">Venda apenas</span>' : ''}</td>
       <td>${formatCurrency(item.valorVenda)}</td>
       <td>${formatCurrency(meta)}</td>
       <td>${percentMeta.toFixed(0)}%</td>
       ${showStock ? `<td>${item.hasEstoqueData ? formatCurrency(item.valorEstoque) : '—'}</td>` : ''}
-      <td>${formatCurrency(item.valorQuebra)}</td>
-      <td>${item.hasFaltaData ? formatCurrency(item.valorFalta) : '—'}</td>
-      <td>${item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>
-      <td>${formatPercent(item.percentualQuebra)}</td>
-      <td><span class="status-badge ${status.className}">${status.label}</span></td>
+      ${contextHasBreak ? `
+        <td>${hasBreak ? formatCurrency(item.valorQuebra) : '—'}</td>
+        <td>${hasBreak && item.hasFaltaData ? formatCurrency(item.valorFalta) : '—'}</td>
+        <td>${hasBreak && item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>
+        <td>${hasBreak ? formatPercent(item.percentualQuebra) : '—'}</td>
+        <td>${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '—'}</td>` : ''}
     </tr>`;
-  }).join('') : `<tr><td colspan="${showStock ? 11 : 10}">Nenhum acumulado mensal encontrado para os filtros selecionados.</td></tr>`;
+  }).join('') : `<tr><td colspan="${5 + (showStock ? 1 : 0) + (contextHasBreak ? 5 : 0)}">Nenhum acumulado mensal encontrado para os filtros selecionados.</td></tr>`;
 }
 
 function renderAdminTable() {
@@ -2132,20 +2183,25 @@ function renderAdminTable() {
 function renderAlerts(filtered) {
   const displayRecords = getDisplayRecords(filtered);
   const totals = aggregateRecords(displayRecords);
-  const summaryByNetwork = aggregateByNetwork(displayRecords).sort((a, b) => b.percQuebra - a.percQuebra);
-  const rankingByStore = aggregateByStore(displayRecords).sort((a, b) => b.percentualQuebra - a.percentualQuebra);
+  const hasBreak = hasBreakTrackingForRecords(displayRecords);
+  const summaryByNetwork = aggregateByNetwork(displayRecords)
+    .filter(item => hasBreakTrackingForRecords(displayRecords.filter(row => row.rede === item.rede)))
+    .sort((a, b) => b.percQuebra - a.percQuebra);
+  const rankingByStore = aggregateByStore(displayRecords)
+    .filter(item => hasBreakTrackingForStore(item.rede, item.loja))
+    .sort((a, b) => b.percentualQuebra - a.percentualQuebra);
   const metaTarget = resolveActiveMetaTarget(displayRecords);
   const metaPercent = metaTarget > 0 ? (totals.venda / metaTarget) * 100 : 0;
 
   const alerts = [];
-  if (summaryByNetwork.length) {
+  if (hasBreak && summaryByNetwork.length) {
     const topNetwork = summaryByNetwork[0];
     const tone = topNetwork.percQuebra > BREAK_LIMIT ? 'bad' : topNetwork.percQuebra > WARNING_LIMIT ? 'warn' : 'good';
     const title = tone === 'bad' ? `${topNetwork.rede} com quebra elevada` : tone === 'warn' ? `${topNetwork.rede} em atenção` : `${topNetwork.rede} dentro da meta`;
     alerts.push({ tone, icon: tone === 'bad' ? '!' : tone === 'warn' ? '⚠' : '✓', title, text: `Quebra atual de ${formatPercent(topNetwork.percQuebra)} na rede.` });
   }
 
-  if (rankingByStore.length) {
+  if (hasBreak && rankingByStore.length) {
     const worstStore = rankingByStore[0];
     const tone = worstStore.percentualQuebra > BREAK_LIMIT ? 'bad' : worstStore.percentualQuebra > WARNING_LIMIT ? 'warn' : 'good';
     alerts.push({ tone, icon: tone === 'bad' ? '!' : tone === 'warn' ? '⚠' : '✓', title: `${worstStore.loja} no radar`, text: `Loja com ${formatPercent(worstStore.percentualQuebra)} de quebra no acumulado exibido.` });
@@ -2158,6 +2214,15 @@ function renderAlerts(filtered) {
     title: metaTone === 'good' ? 'Venda em crescimento' : metaTone === 'warn' ? 'Meta em acompanhamento' : 'Meta abaixo do esperado',
     text: `Performance atual em ${metaPercent.toFixed(0)}% da meta definida.`
   });
+
+  if (!hasBreak && displayRecords.length) {
+    alerts.push({
+      tone: 'good',
+      icon: 'R$',
+      title: 'Visão somente de venda',
+      text: 'Esta loja não possui informação de quebra na base histórica; o painel não classifica 0% como dentro da meta.'
+    });
+  }
 
   els.alertsGrid.innerHTML = alerts.slice(0, 3).map(alert => `
     <article class="alert-card alert-card--${alert.tone}">
@@ -2195,7 +2260,8 @@ function renderCharts(filtered) {
     options: baseChartOptions({ currencyTicks: true })
   });
 
-  const networkSummary = aggregateByNetwork(monthlyBase);
+  const networkSummary = aggregateByNetwork(monthlyBase)
+    .filter(item => hasBreakTrackingForRecords(monthlyBase.filter(row => row.rede === item.rede)));
   upsertChart('breakByNetwork', els.breakByNetworkChart, {
     type: 'bar',
     data: {
@@ -2211,7 +2277,8 @@ function renderCharts(filtered) {
     options: baseChartOptions({ percentTicks: true, legend: false })
   });
 
-  const storeRankingSource = aggregateByStore(monthlyBase);
+  const storeRankingSource = aggregateByStore(monthlyBase)
+    .filter(item => hasBreakTrackingForStore(item.rede, item.loja));
   const storeRanking = [...storeRankingSource]
     .filter(item => item.valorVenda > 0)
     .sort((a, b) => b.percentualQuebraOperacional - a.percentualQuebraOperacional || b.valorVenda - a.valorVenda)
@@ -2399,6 +2466,90 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
+
+
+function rowHasFlexibleHeader(row, groups) {
+  const headers = Object.keys(row || {});
+  return (groups || []).some(group => headers.some(header => headerMatchesGroup(header, group)));
+}
+
+function hasBreakTrackingForStore(network, store, monthKey = '', weekLabel = '') {
+  const networkConfig = NETWORKS.find(item => item.id === network);
+  if (networkConfig && networkConfig.hasBreak === false) return false;
+
+  const resolvedMonth = monthKey
+    || (appState.filters.mes !== 'Todas' ? appState.filters.mes : getMonthlySummaryMonthKey());
+  const resolvedWeek = weekLabel
+    || (appState.filters.semana !== 'Todas' ? appState.filters.semana : '');
+
+  const records = [...appState.storeData, ...appState.data].filter(item => {
+    if (!item || item.isNetworkTotalOnly || item.rede !== network || item.loja !== store) return false;
+    const itemMonth = item.monthKey || inferRecordMonthKey(item);
+    if (resolvedMonth && itemMonth !== resolvedMonth) return false;
+    if (resolvedWeek && item.semana !== resolvedWeek) return false;
+    return true;
+  });
+
+  return records.some(item => Math.abs(Number(item.valorQuebra || item.valorQuebraOperacional || 0)) > 0.005);
+}
+
+function hasBreakTrackingForRecords(records) {
+  return (records || []).some(item => {
+    if (!item) return false;
+    const networkConfig = NETWORKS.find(network => network.id === item.rede);
+    if (networkConfig && networkConfig.hasBreak === false) return false;
+    return Math.abs(Number(item.valorQuebra || item.valorQuebraOperacional || 0)) > 0.005;
+  });
+}
+
+function getBreakDisplayForStore(network, store, percent = 0, sale = 0) {
+  const hasBreak = hasBreakTrackingForStore(network, store);
+  return {
+    hasBreak,
+    status: hasBreak ? monthlyStatusInfo(percent, sale) : { label: 'Venda apenas', className: 'status--neutral' }
+  };
+}
+
+function getNetworkMonthlyHistory(network) {
+  const monthKeys = [...new Set([...appState.storeData, ...appState.data]
+    .filter(item => item && item.rede === network)
+    .map(item => item.monthKey || inferRecordMonthKey(item))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+
+  return monthKeys.map(monthKey => {
+    const storeRecords = getMonthlyStoreBase(monthKey, network);
+    const records = storeRecords.length
+      ? storeRecords
+      : getMonthlyNetworkBase(monthKey).filter(item => item.rede === network);
+    const totals = aggregateRecords(records);
+    const hasBreak = hasBreakTrackingForRecords(records);
+    return {
+      monthKey,
+      monthLabel: formatMonthFilterLabel(monthKey),
+      venda: Number(totals.venda.toFixed(2)),
+      quebra: Number(totals.quebra.toFixed(2)),
+      percentualQuebra: hasBreak && totals.venda > 0 ? Number(((totals.quebra / totals.venda) * 100).toFixed(2)) : null,
+      hasBreak
+    };
+  });
+}
+
+function syncContextFiltersFromMonthly(network = '', store = '') {
+  appState.filters.rede = network || 'Todas';
+  appState.filters.loja = store || 'Todas';
+  appState.rankingRede = network || 'Todas';
+  appState.detailsRede = network || 'Todas';
+  initCustomSelects();
+}
+
+function destroyMonthlyNetworkHistoryChart() {
+  if (appState.charts.monthlyNetworkHistory) {
+    appState.charts.monthlyNetworkHistory.destroy();
+    delete appState.charts.monthlyNetworkHistory;
+  }
+}
+
 function monthlyStatusInfo(percent, sale) {
   if (Number(sale || 0) <= 0) return { label: 'Sem venda', className: 'status--neutral' };
   if (percent <= WARNING_LIMIT) return { label: 'Dentro da meta', className: 'status--good' };
@@ -2414,6 +2565,7 @@ function renderMonthlySummary() {
     els.monthlyBreadcrumbs.innerHTML = '';
     els.monthlySummaryBody.innerHTML = '<div class="monthly-empty">Importe as bases semanais para iniciar o resumo mensal.</div>';
     destroyMonthlyStoreChart();
+    destroyMonthlyNetworkHistoryChart();
     return;
   }
 
@@ -2449,8 +2601,8 @@ function renderMonthlyBreadcrumbs() {
 
 function renderMonthlyNetworks(monthKey) {
   destroyMonthlyStoreChart();
-  // O Resumo Mensal deve fechar exatamente com o drill-down por lojas.
-  // Por isso, sua fonte primária é sempre a base detalhada por loja.
+  destroyMonthlyNetworkHistoryChart();
+
   let networkBase = getMonthlyStoreBase(monthKey);
   if (!networkBase.length) networkBase = getMonthlyNetworkBase(monthKey);
   if (appState.filters.rede !== 'Todas') networkBase = networkBase.filter(item => item.rede === appState.filters.rede);
@@ -2470,23 +2622,23 @@ function renderMonthlyNetworks(monthKey) {
   els.monthlySummaryBody.innerHTML = `<div class="monthly-network-grid">${ordered.map(item => {
     const stores = new Set(storeBase.filter(row => row.rede === item.rede).map(row => row.loja));
     const percent = Number(item.percQuebra || 0);
-    const status = monthlyStatusInfo(percent, item.venda);
-    const networkConfig = NETWORKS.find(n => n.id === item.rede);
-    const hasBreak = networkConfig ? networkConfig.hasBreak !== false : true;
+    const networkRecords = networkBase.filter(row => row.rede === item.rede);
+    const hasBreak = hasBreakTrackingForRecords(networkRecords);
+    const status = hasBreak ? monthlyStatusInfo(percent, item.venda) : { label: 'Venda apenas', className: 'status--neutral' };
     const canOpen = stores.size > 0;
-    return `<button type="button" class="monthly-network-card ${canOpen ? '' : 'is-disabled'}" ${canOpen ? `data-monthly-network="${escapeHtml(item.rede)}"` : 'disabled'}>
+    return `<button type="button" class="monthly-network-card ${canOpen ? '' : 'is-disabled'} ${hasBreak ? '' : 'monthly-network-card--sales-only'}" ${canOpen ? `data-monthly-network="${escapeHtml(item.rede)}"` : 'disabled'}>
       <div class="monthly-network-card__top">
         <span class="monthly-network-name">${escapeHtml(item.rede)}</span>
-        <span class="status-badge ${hasBreak ? status.className : 'status--neutral'}">${hasBreak ? status.label : 'Sem quebra'}</span>
+        ${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}
       </div>
-      <strong class="monthly-network-percent">${hasBreak ? formatPercent(percent) : '—'}</strong>
-      <span class="monthly-network-caption">quebra no mês</span>
+      <strong class="monthly-network-percent">${hasBreak ? formatPercent(percent) : formatCurrency(item.venda)}</strong>
+      <span class="monthly-network-caption">${hasBreak ? 'quebra no mês' : 'venda no mês'}</span>
       <div class="monthly-network-metrics">
         <span><small>Venda</small><b>${formatCurrency(item.venda)}</b></span>
-        <span><small>Quebra</small><b>${formatCurrency(item.quebra)}</b></span>
+        ${hasBreak ? `<span><small>Quebra</small><b>${formatCurrency(item.quebra)}</b></span>` : ''}
         <span><small>Lojas</small><b>${stores.size || '—'}</b></span>
       </div>
-      <span class="monthly-network-action">${canOpen ? 'Ver lojas →' : 'Importe a base por loja'}</span>
+      <span class="monthly-network-action">${canOpen ? 'Ver lojas e histórico →' : 'Importe a base por loja'}</span>
     </button>`;
   }).join('')}</div>`;
 }
@@ -2494,38 +2646,71 @@ function renderMonthlyNetworks(monthKey) {
 function renderMonthlyNetworkStores(monthKey, network) {
   destroyMonthlyStoreChart();
   const records = getMonthlyStoreBase(monthKey, network);
-  const stores = aggregateMonthlyStoreDetails(records).sort((a, b) => b.percentualQuebra - a.percentualQuebra || b.valorVenda - a.valorVenda);
+  const stores = aggregateMonthlyStoreDetails(records).sort((a, b) => {
+    const aHas = hasBreakTrackingForStore(a.rede, a.loja);
+    const bHas = hasBreakTrackingForStore(b.rede, b.loja);
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    if (!aHas && !bHas) return b.valorVenda - a.valorVenda;
+    return b.percentualQuebra - a.percentualQuebra || b.valorVenda - a.valorVenda;
+  });
+
   if (!stores.length) {
     els.monthlySummaryBody.innerHTML = `<div class="monthly-empty">Ainda não há detalhamento por loja para ${escapeHtml(network)} neste mês.</div>`;
+    destroyMonthlyNetworkHistoryChart();
     return;
   }
+
   const total = stores.reduce((acc, row) => {
-    acc.venda += row.valorVenda; acc.quebra += row.valorQuebra; return acc;
+    acc.venda += row.valorVenda;
+    if (hasBreakTrackingForStore(row.rede, row.loja)) acc.quebra += row.valorQuebra;
+    return acc;
   }, { venda: 0, quebra: 0 });
-  const perc = total.venda > 0 ? (total.quebra / total.venda) * 100 : 0;
-  const worst = stores[0];
+  const networkHasBreak = stores.some(row => hasBreakTrackingForStore(row.rede, row.loja));
+  const perc = networkHasBreak && total.venda > 0 ? (total.quebra / total.venda) * 100 : 0;
+  const breakStores = stores.filter(row => hasBreakTrackingForStore(row.rede, row.loja));
+  const worst = breakStores.length ? [...breakStores].sort((a, b) => b.percentualQuebra - a.percentualQuebra)[0] : null;
   const showStock = network === 'COSTA';
+  const history = getNetworkMonthlyHistory(network);
 
   els.monthlySummaryBody.innerHTML = `
-    <div class="monthly-subsummary">
+    <div class="monthly-subsummary ${networkHasBreak ? '' : 'monthly-subsummary--sales-only'}">
       <div><span>Rede</span><strong>${escapeHtml(network)}</strong></div>
       <div><span>Venda das lojas</span><strong>${formatCurrency(total.venda)}</strong></div>
-      <div><span>Quebra das lojas</span><strong>${formatCurrency(total.quebra)}</strong></div>
+      ${networkHasBreak ? `<div><span>Quebra das lojas</span><strong>${formatCurrency(total.quebra)}</strong></div>
       <div><span>% quebra</span><strong>${formatPercent(perc)}</strong></div>
-      <div><span>Maior quebra</span><strong>${escapeHtml(worst.loja)} • ${formatPercent(worst.percentualQuebra)}</strong></div>
+      ${worst ? `<div><span>Maior quebra</span><strong>${escapeHtml(worst.loja)} • ${formatPercent(worst.percentualQuebra)}</strong></div>` : ''}` : ''}
     </div>
+
+    <article class="monthly-history-panel">
+      <div class="monthly-history-head">
+        <div>
+          <p class="eyebrow">Comparativo histórico</p>
+          <strong>Evolução mensal • ${escapeHtml(network)}</strong>
+        </div>
+        <span>${history.length ? `${history[0].monthLabel} → ${history[history.length - 1].monthLabel}` : 'Sem histórico'}</span>
+      </div>
+      <div class="monthly-history-chart-wrap"><canvas id="monthlyNetworkHistoryChart"></canvas></div>
+      <div class="monthly-history-months">
+        ${history.map(item => `<div class="monthly-history-month ${item.monthKey === monthKey ? 'is-current' : ''}">
+          <span>${escapeHtml(item.monthLabel)}</span>
+          <strong>${formatCurrency(item.venda)}</strong>
+          ${item.hasBreak && item.percentualQuebra !== null ? `<small>${formatPercent(item.percentualQuebra)} quebra</small>` : '<small>Venda apenas</small>'}
+        </div>`).join('')}
+      </div>
+    </article>
+
     <div class="table-wrap monthly-store-table-wrap">
       <table class="monthly-store-table">
         <thead><tr><th>Loja</th><th>Venda mês</th><th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>${showStock ? '<th>Estoque atual</th>' : ''}<th>Semanas</th><th></th></tr></thead>
         <tbody>${stores.map(item => {
-          const status = monthlyStatusInfo(item.percentualQuebra, item.valorVenda);
-          return `<tr class="monthly-store-row" data-monthly-store="${escapeHtml(item.loja)}">
-            <td><strong>${escapeHtml(item.loja)}</strong><br><span class="status-badge ${status.className}">${status.label}</span></td>
+          const display = getBreakDisplayForStore(item.rede, item.loja, item.percentualQuebra, item.valorVenda);
+          return `<tr class="monthly-store-row ${display.hasBreak ? '' : 'monthly-store-row--sales-only'}" data-monthly-store="${escapeHtml(item.loja)}">
+            <td><strong>${escapeHtml(item.loja)}</strong><br>${display.hasBreak ? `<span class="status-badge ${display.status.className}">${display.status.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}</td>
             <td>${formatCurrency(item.valorVenda)}</td>
-            <td>${formatCurrency(item.valorQuebra)}</td>
-            <td><strong>${formatPercent(item.percentualQuebra)}</strong></td>
-            <td>${item.hasFaltaData ? formatCurrency(item.valorFalta) : '—'}</td>
-            <td>${item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>
+            <td>${display.hasBreak ? formatCurrency(item.valorQuebra) : '—'}</td>
+            <td>${display.hasBreak ? `<strong>${formatPercent(item.percentualQuebra)}</strong>` : '—'}</td>
+            <td>${display.hasBreak && item.hasFaltaData ? formatCurrency(item.valorFalta) : '—'}</td>
+            <td>${display.hasBreak && item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>
             ${showStock ? `<td>${item.hasEstoqueData ? formatCurrency(item.valorEstoque) : '—'}</td>` : ''}
             <td>${item.weekCount}</td>
             <td><button type="button" class="btn btn--ghost btn--sm" data-monthly-store="${escapeHtml(item.loja)}">Semanas →</button></td>
@@ -2533,9 +2718,92 @@ function renderMonthlyNetworkStores(monthKey, network) {
         }).join('')}</tbody>
       </table>
     </div>`;
+
+  renderMonthlyNetworkHistoryChart(history, networkHasBreak);
 }
 
+
+function renderMonthlyNetworkHistoryChart(history, hasBreak) {
+  if (!window.Chart) return;
+  const canvas = document.getElementById('monthlyNetworkHistoryChart');
+  if (!canvas) return;
+  destroyMonthlyNetworkHistoryChart();
+
+  const datasets = [
+    {
+      type: 'line',
+      label: 'Venda',
+      data: history.map(item => item.venda),
+      yAxisID: 'y',
+      borderColor: '#36d27c',
+      backgroundColor: 'rgba(54,210,124,0.16)',
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.32,
+      borderWidth: 3,
+      fill: true
+    }
+  ];
+
+  if (hasBreak) {
+    datasets.push({
+      type: 'line',
+      label: '% Quebra',
+      data: history.map(item => item.hasBreak ? item.percentualQuebra : null),
+      yAxisID: 'y1',
+      borderColor: '#f4c84b',
+      backgroundColor: '#f4c84b',
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.32,
+      borderWidth: 3,
+      spanGaps: false
+    });
+  }
+
+  appState.charts.monthlyNetworkHistory = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: history.map(item => item.monthLabel.replace('/2026', '')),
+      datasets
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#dbe8e0', usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: context => context.dataset.yAxisID === 'y1'
+              ? `${context.dataset.label}: ${formatPercent(context.raw)}`
+              : `${context.dataset.label}: ${formatCurrency(context.raw)}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#b3c4bc' }, grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#b3c4bc', callback: value => compactCurrency(value) },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        ...(hasBreak ? {
+          y1: {
+            beginAtZero: true,
+            position: 'right',
+            ticks: { color: '#b3c4bc', callback: value => `${value}%` },
+            grid: { drawOnChartArea: false }
+          }
+        } : {})
+      }
+    }
+  });
+}
+
+
 function renderMonthlyStoreWeeks(monthKey, network, store) {
+  destroyMonthlyNetworkHistoryChart();
   const records = getMonthlyStoreBase(monthKey, network).filter(item => item.loja === store);
   const weeks = aggregateWeeklyStoreDetails(records);
   if (!weeks.length) {
@@ -2543,61 +2811,126 @@ function renderMonthlyStoreWeeks(monthKey, network, store) {
     destroyMonthlyStoreChart();
     return;
   }
+
+  const hasBreak = hasBreakTrackingForStore(network, store);
   const totals = weeks.reduce((acc, row) => {
-    acc.venda += row.valorVenda; acc.quebra += row.valorQuebra; acc.falta += row.valorFalta; acc.qualidade += row.valorQualidade; return acc;
+    acc.venda += row.valorVenda;
+    if (hasBreak) {
+      acc.quebra += row.valorQuebra;
+      acc.falta += row.valorFalta;
+      acc.qualidade += row.valorQualidade;
+    }
+    return acc;
   }, { venda: 0, quebra: 0, falta: 0, qualidade: 0 });
-  const percent = totals.venda > 0 ? (totals.quebra / totals.venda) * 100 : 0;
-  const status = monthlyStatusInfo(percent, totals.venda);
+  const percent = hasBreak && totals.venda > 0 ? (totals.quebra / totals.venda) * 100 : 0;
+  const status = hasBreak ? monthlyStatusInfo(percent, totals.venda) : { label: 'Venda apenas', className: 'status--neutral' };
   const showStock = network === 'COSTA';
 
   els.monthlySummaryBody.innerHTML = `
     <div class="monthly-store-title">
       <div><p class="eyebrow">${escapeHtml(network)}</p><h4>${escapeHtml(store)}</h4></div>
-      <span class="status-badge ${status.className}">${status.label}</span>
+      ${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '<span class="sales-only-label sales-only-label--large">Venda apenas</span>'}
     </div>
-    <div class="monthly-kpi-grid">
+    <div class="monthly-kpi-grid ${hasBreak ? '' : 'monthly-kpi-grid--sales-only'}">
       <div class="monthly-kpi"><span>Venda no mês</span><strong>${formatCurrency(totals.venda)}</strong></div>
-      <div class="monthly-kpi"><span>Quebra no mês</span><strong>${formatCurrency(totals.quebra)}</strong></div>
-      <div class="monthly-kpi"><span>% Quebra</span><strong>${formatPercent(percent)}</strong></div>
+      ${hasBreak ? `<div class="monthly-kpi"><span>Quebra no mês</span><strong>${formatCurrency(totals.quebra)}</strong></div>
+      <div class="monthly-kpi"><span>% Quebra</span><strong>${formatPercent(percent)}</strong></div>` : ''}
       <div class="monthly-kpi"><span>Semanas importadas</span><strong>${weeks.length}</strong></div>
     </div>
     <div class="monthly-store-detail-grid">
-      <article class="monthly-chart-panel"><div class="monthly-chart-head"><strong>Evolução semanal</strong><span>Venda × % de quebra</span></div><div class="monthly-chart-wrap"><canvas id="monthlyStoreTrendChart"></canvas></div></article>
+      <article class="monthly-chart-panel">
+        <div class="monthly-chart-head">
+          <strong>Evolução semanal</strong>
+          <span>${hasBreak ? 'Venda × % de quebra' : 'Venda por semana'}</span>
+        </div>
+        <div class="monthly-chart-wrap"><canvas id="monthlyStoreTrendChart"></canvas></div>
+      </article>
       <div class="table-wrap">
         <table class="monthly-week-table">
-          <thead><tr><th>Semana</th><th>Venda</th><th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>${showStock ? '<th>Estoque</th>' : ''}</tr></thead>
+          <thead><tr><th>Semana</th><th>Venda</th>${hasBreak ? `<th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>` : ''}${showStock ? '<th>Estoque</th>' : ''}</tr></thead>
           <tbody>${weeks.map(row => `<tr>
-            <td><strong>${escapeHtml(row.semana)}</strong></td><td>${formatCurrency(row.valorVenda)}</td><td>${formatCurrency(row.valorQuebra)}</td>
-            <td><strong>${formatPercent(row.percentualQuebra)}</strong></td><td>${row.hasFaltaData ? formatCurrency(row.valorFalta) : '—'}</td><td>${row.hasQualidadeData ? formatCurrency(row.valorQualidade) : '—'}</td>${showStock ? `<td>${row.hasEstoqueData ? formatCurrency(row.valorEstoque) : '—'}</td>` : ''}
+            <td><strong>${escapeHtml(row.semana)}</strong></td>
+            <td>${formatCurrency(row.valorVenda)}</td>
+            ${hasBreak ? `<td>${formatCurrency(row.valorQuebra)}</td>
+            <td><strong>${formatPercent(row.percentualQuebra)}</strong></td>
+            <td>${row.hasFaltaData ? formatCurrency(row.valorFalta) : '—'}</td>
+            <td>${row.hasQualidadeData ? formatCurrency(row.valorQualidade) : '—'}</td>` : ''}
+            ${showStock ? `<td>${row.hasEstoqueData ? formatCurrency(row.valorEstoque) : '—'}</td>` : ''}
           </tr>`).join('')}</tbody>
         </table>
       </div>
     </div>`;
-  renderMonthlyStoreTrendChart(weeks);
+  renderMonthlyStoreTrendChart(weeks, hasBreak);
 }
 
-function renderMonthlyStoreTrendChart(weeks) {
+function renderMonthlyStoreTrendChart(weeks, hasBreak = true) {
   if (!window.Chart) return;
   const canvas = document.getElementById('monthlyStoreTrendChart');
   if (!canvas) return;
+
+  const datasets = [
+    {
+      type: hasBreak ? 'bar' : 'line',
+      label: 'Venda',
+      data: weeks.map(row => row.valorVenda),
+      yAxisID: 'y',
+      backgroundColor: hasBreak ? 'rgba(54,210,124,0.55)' : 'rgba(54,210,124,0.16)',
+      borderColor: '#36d27c',
+      borderRadius: hasBreak ? 8 : 0,
+      maxBarThickness: hasBreak ? 42 : undefined,
+      pointRadius: hasBreak ? 0 : 4,
+      pointHoverRadius: hasBreak ? 0 : 6,
+      tension: hasBreak ? 0 : 0.3,
+      borderWidth: hasBreak ? 0 : 3,
+      fill: !hasBreak
+    }
+  ];
+
+  if (hasBreak) {
+    datasets.push({
+      type: 'line',
+      label: '% Quebra',
+      data: weeks.map(row => row.percentualQuebra),
+      yAxisID: 'y1',
+      borderColor: '#f4c84b',
+      backgroundColor: '#f4c84b',
+      pointRadius: 4,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      borderWidth: 3
+    });
+  }
+
   upsertChart('monthlyStoreTrend', canvas, {
-    data: {
-      labels: weeks.map(row => row.semana),
-      datasets: [
-        { type: 'bar', label: 'Venda', data: weeks.map(row => row.valorVenda), yAxisID: 'y', backgroundColor: 'rgba(54,210,124,0.55)', borderRadius: 8, maxBarThickness: 42 },
-        { type: 'line', label: '% Quebra', data: weeks.map(row => row.percentualQuebra), yAxisID: 'y1', borderColor: '#f4c84b', backgroundColor: '#f4c84b', pointRadius: 4, pointHoverRadius: 5, tension: 0.3, borderWidth: 3 }
-      ]
-    },
+    data: { labels: weeks.map(row => row.semana), datasets },
     options: {
-      responsive: true, maintainAspectRatio: false,
+      responsive: true,
+      maintainAspectRatio: false,
       plugins: {
         legend: { labels: { color: '#dbe8e0', usePointStyle: true } },
-        tooltip: { callbacks: { label: context => context.dataset.yAxisID === 'y1' ? `${context.dataset.label}: ${formatPercent(context.raw)}` : `${context.dataset.label}: ${formatCurrency(context.raw)}` } }
+        tooltip: {
+          callbacks: {
+            label: context => context.dataset.yAxisID === 'y1'
+              ? `${context.dataset.label}: ${formatPercent(context.raw)}`
+              : `${context.dataset.label}: ${formatCurrency(context.raw)}`
+          }
+        }
       },
       scales: {
         x: { ticks: { color: '#b3c4bc' }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: '#b3c4bc', callback: value => compactCurrency(value) }, grid: { color: 'rgba(255,255,255,0.05)' } },
-        y1: { beginAtZero: true, position: 'right', ticks: { color: '#b3c4bc', callback: value => `${value}%` }, grid: { drawOnChartArea: false } }
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#b3c4bc', callback: value => compactCurrency(value) },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        ...(hasBreak ? {
+          y1: {
+            beginAtZero: true,
+            position: 'right',
+            ticks: { color: '#b3c4bc', callback: value => `${value}%` },
+            grid: { drawOnChartArea: false }
+          }
+        } : {})
       }
     }
   });
@@ -2613,23 +2946,35 @@ function destroyMonthlyStoreChart() {
 function handleMonthlySummaryClick(event) {
   const networkButton = event.target.closest('[data-monthly-network]');
   if (networkButton) {
-    appState.monthlyDrilldown = { network: networkButton.dataset.monthlyNetwork, store: '' };
-    renderMonthlySummary();
+    const network = networkButton.dataset.monthlyNetwork;
+    appState.monthlyDrilldown = { network, store: '' };
+    syncContextFiltersFromMonthly(network, '');
+    refreshAll();
     return;
   }
+
   const storeButton = event.target.closest('[data-monthly-store]');
   if (storeButton) {
-    appState.monthlyDrilldown.store = storeButton.dataset.monthlyStore;
-    renderMonthlySummary();
+    const store = storeButton.dataset.monthlyStore;
+    const network = appState.monthlyDrilldown.network;
+    appState.monthlyDrilldown.store = store;
+    syncContextFiltersFromMonthly(network, store);
+    refreshAll();
   }
 }
 
 function handleMonthlyBreadcrumbClick(event) {
   const button = event.target.closest('[data-monthly-level]');
   if (!button) return;
-  if (button.dataset.monthlyLevel === 'networks') appState.monthlyDrilldown = { network: '', store: '' };
-  if (button.dataset.monthlyLevel === 'stores') appState.monthlyDrilldown.store = '';
-  renderMonthlySummary();
+
+  if (button.dataset.monthlyLevel === 'networks') {
+    appState.monthlyDrilldown = { network: '', store: '' };
+    syncContextFiltersFromMonthly('', '');
+  } else if (button.dataset.monthlyLevel === 'stores') {
+    appState.monthlyDrilldown.store = '';
+    syncContextFiltersFromMonthly(appState.monthlyDrilldown.network, '');
+  }
+  refreshAll();
 }
 
 function aggregateByNetwork(records) {

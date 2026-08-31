@@ -1576,3 +1576,83 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
 .monthly-history-note strong {
   color: #dff5e8;
 }
+
+/* ===== V3 • DRILL-DOWN CONTEXTUAL + HISTÓRICO MENSAL ===== */
+.sales-only-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(119, 212, 255, .22);
+  background: rgba(119, 212, 255, .07);
+  color: #a9ddf7;
+  font-size: .78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sales-only-label--large { min-height: 36px; padding: 8px 14px; font-size: .86rem; }
+.ranking-row--sales-only,
+.monthly-store-row--sales-only,
+.details-row--sales-only { background: rgba(119, 212, 255, .015); }
+.ranking-break__empty { color: var(--muted); font-weight: 700; }
+.monthly-network-card--sales-only .monthly-network-percent { font-size: clamp(1.45rem, 2.6vw, 2.1rem); }
+.monthly-network-card--sales-only .monthly-network-caption { color: #a9ddf7; }
+.monthly-subsummary--sales-only { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.monthly-kpi-grid--sales-only { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.monthly-history-panel {
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(54,210,124,.035), rgba(255,255,255,.015));
+}
+.monthly-history-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.monthly-history-head strong { display: block; margin-top: 3px; color: #fff; font-size: 1.08rem; }
+.monthly-history-head > span { color: var(--muted); font-size: .82rem; text-align: right; }
+.monthly-history-chart-wrap { height: 300px; }
+.monthly-history-months {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.monthly-history-month {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 14px;
+  background: rgba(255,255,255,.018);
+}
+.monthly-history-month.is-current {
+  border-color: rgba(54,210,124,.38);
+  background: rgba(54,210,124,.075);
+}
+.monthly-history-month span,
+.monthly-history-month small { display: block; color: var(--muted); }
+.monthly-history-month span { font-size: .76rem; margin-bottom: 5px; }
+.monthly-history-month strong {
+  display: block;
+  color: #f5faf7;
+  font-size: .9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.monthly-history-month small { margin-top: 4px; font-size: .72rem; }
+
+@media (max-width: 760px) {
+  .monthly-history-head { flex-direction: column; }
+  .monthly-history-head > span { text-align: left; }
+  .monthly-history-chart-wrap { height: 250px; }
+  .monthly-history-months { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .monthly-subsummary--sales-only,
+  .monthly-kpi-grid--sales-only { grid-template-columns: 1fr; }
+}
