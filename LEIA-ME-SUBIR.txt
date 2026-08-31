@@ -81,3 +81,10 @@ V8 — METAS MENSAIS
 - Se o mês não tiver meta cadastrada, o painel exibe “Meta não cadastrada” em vez de usar R$ 1.000.000,00.
 - Metas por Rede permanecem em aba própria para os drill-downs de rede/loja.
 - Em filtro semanal, a meta mensal geral é rateada pela quantidade de semanas importadas no mês.
+
+
+CORREÇÃO V9 — INICIALIZAÇÃO
+- O painel carrega a base local/histórica ANTES de consultar o Firebase.
+- Firebase agora sincroniza em segundo plano e não bloqueia filtros, ADM ou botões.
+- Preserva Metas Mensais e histórico completo da V7/V8.
+- Após publicar, substitua todos os arquivos do ZIP e faça Ctrl+F5.

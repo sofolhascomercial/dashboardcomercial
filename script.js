@@ -15,8 +15,8 @@ const ADM_CREDENTIALS = {
   password: 'sofolhas2026'
 };
 
-const STORAGE_KEY = 'sofolhas-dashboard-v8';
-const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v7', 'sofolhas-dashboard-v6'];
+const STORAGE_KEY = 'sofolhas-dashboard-v9';
+const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v8', 'sofolhas-dashboard-v7', 'sofolhas-dashboard-v6'];
 const HISTORY_SEED_VERSION = 'historico-2026-jan-ago3-completo-v2';
 const BREAK_LIMIT = 12;
 const WARNING_LIMIT = 10;
@@ -246,14 +246,18 @@ function subscribeRemoteState() {
     if (remoteHash === firebaseBridge.lastSyncedHash) return;
 
     applyPersistedState(remoteState);
+    mergePreloadedHistory();
     firebaseBridge.lastSyncedHash = remoteHash;
     persistLocal({ skipRemote: true });
 
     syncLojaOptions();
+    syncMesOptions();
     syncSemanaOptions();
     buildMetaInputs();
+    buildMonthlyGoalInputs();
     refreshAll();
     renderImportBatchesTable();
+    renderStoreImportBatchesTable();
     renderAdminTable();
   });
 }
@@ -551,14 +555,71 @@ function mergePreloadedHistory() {
 
 
 
-async function init() {
+function init() {
   cacheElements();
-  await seedInitialState();
+
+  // Inicialização local primeiro: o painel fica funcional imediatamente,
+  // mesmo se Firebase/CDN estiver lento ou indisponível.
+  const saved = readStorage();
+  applyPersistedState(saved);
+  mergePreloadedHistory();
+
   buildMetaInputs();
   buildMonthlyGoalInputs();
   initCustomSelects();
   bindEvents();
+  firebaseBridge.initialLoadComplete = true;
   refreshAll();
+
+  // Garante uma cópia local da base histórica antes de qualquer chamada remota.
+  persistLocal({ skipRemote: true });
+
+  // Firebase passa a sincronizar em segundo plano e nunca bloqueia botões/dados.
+  syncRemoteStateInBackground(saved);
+}
+
+async function syncRemoteStateInBackground(saved) {
+  const firebaseReady = await initFirebaseBridge();
+  if (!firebaseReady) return;
+
+  let remoteState = null;
+  try {
+    remoteState = await Promise.race([
+      loadRemoteStateOnce(),
+      new Promise(resolve => setTimeout(() => resolve(null), 4000))
+    ]);
+  } catch (error) {
+    console.error('Falha na sincronização inicial em segundo plano:', error);
+  }
+
+  const hasRemoteState = remoteState && (
+    Array.isArray(remoteState.data) ||
+    Array.isArray(remoteState.storeData) ||
+    Array.isArray(remoteState.imports) ||
+    Array.isArray(remoteState.storeImports) ||
+    remoteState.config
+  );
+
+  if (hasRemoteState) {
+    applyPersistedState(remoteState);
+    // A carga embarcada sempre completa versões remotas antigas/incompletas.
+    mergePreloadedHistory();
+    firebaseBridge.lastSyncedHash = getStateHash(remoteState);
+    persistLocal({ skipRemote: true });
+
+    syncLojaOptions();
+    syncMesOptions();
+    syncSemanaOptions();
+    buildMetaInputs();
+    buildMonthlyGoalInputs();
+    refreshAll();
+    renderImportBatchesTable();
+    renderStoreImportBatchesTable();
+    renderAdminTable();
+  } else if (saved || appState.data.length || appState.storeData.length) {
+    // Se não houver estado remoto disponível, mantém o local e tenta publicá-lo.
+    queueRemotePersist();
+  }
 }
 
 function cacheElements() {
