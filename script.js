@@ -15,9 +15,9 @@ const ADM_CREDENTIALS = {
   password: 'sofolhas2026'
 };
 
-const STORAGE_KEY = 'sofolhas-dashboard-v10';
-const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v9', 'sofolhas-dashboard-v8', 'sofolhas-dashboard-v7', 'sofolhas-dashboard-v6'];
-const HISTORY_SEED_VERSION = 'historico-2026-jan-ago3-completo-v2';
+const STORAGE_KEY = 'sofolhas-dashboard-v7';
+const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v6'];
+const HISTORY_SEED_VERSION = 'historico-semanal-2026-jan-ago3-v1';
 const BREAK_LIMIT = 12;
 const WARNING_LIMIT = 10;
 const CIRCLE_LENGTH = 326.73;
@@ -57,7 +57,6 @@ const appState = {
   config: {
     metaGeral: 1000000,
     metasPorRede: {},
-    metasPorMes: {},
     ultimaAtualizacao: null,
     ultimaImportacao: null
   },
@@ -70,7 +69,7 @@ const appState = {
   detailsRede: 'Todas',
   rankingRede: 'Todas',
   detailsExpanded: false,
-  admTab: 'metas-mensais',
+  admTab: 'metas',
   drawerOpen: false,
   isAdmAuthenticated: false,
   customSelects: {},
@@ -153,7 +152,6 @@ function getStateHash(snapshot) {
 
 function applyPersistedState(saved) {
   appState.config.metasPorRede = defaultMetasPorRede();
-  appState.config.metasPorMes = {};
 
   if (saved) {
     appState.data = Array.isArray(saved.data) ? saved.data : [];
@@ -167,8 +165,7 @@ function applyPersistedState(saved) {
     appState.config = {
       ...appState.config,
       ...(saved.config || {}),
-      metasPorRede: { ...defaultMetasPorRede(), ...deserializeMetaKeysFromFirebase(saved.config?.metasPorRede || {}) },
-      metasPorMes: normalizeMonthlyGoals(saved.config?.metasPorMes || {})
+      metasPorRede: { ...defaultMetasPorRede(), ...deserializeMetaKeysFromFirebase(saved.config?.metasPorRede || {}) }
     };
   } else {
     appState.data = [];
@@ -178,7 +175,6 @@ function applyPersistedState(saved) {
     appState.config = {
       ...appState.config,
       metasPorRede: defaultMetasPorRede(),
-      metasPorMes: {},
       ultimaAtualizacao: null,
       ultimaImportacao: null
     };
@@ -246,18 +242,14 @@ function subscribeRemoteState() {
     if (remoteHash === firebaseBridge.lastSyncedHash) return;
 
     applyPersistedState(remoteState);
-    mergePreloadedHistory();
     firebaseBridge.lastSyncedHash = remoteHash;
     persistLocal({ skipRemote: true });
 
     syncLojaOptions();
-    syncMesOptions();
     syncSemanaOptions();
     buildMetaInputs();
-    buildMonthlyGoalInputs();
     refreshAll();
     renderImportBatchesTable();
-    renderStoreImportBatchesTable();
     renderAdminTable();
   });
 }
@@ -486,26 +478,14 @@ function normalizeStoredRecord(record) {
   };
 }
 
-function isAggregateStoreRecord(record) {
-  if (!record) return false;
-  if (record.isNetworkTotalOnly === true) return true;
-  const storeKey = normalizeStoreKey(record.loja || '');
-  if (!storeKey) return false;
-  return storeKey === 'total'
-    || storeKey === 'total da rede'
-    || storeKey.startsWith('total da rede ')
-    || storeKey.startsWith('total ');
-}
-
 function normalizeStoredStoreRecord(record) {
   if (!record || typeof record !== 'object') return record;
   const base = normalizeStoredRecord(record);
-  const aggregateOnly = isAggregateStoreRecord({ ...record, loja: base.loja });
   return {
     ...base,
     valorRecebido: Number(record.valorRecebido || 0),
-    sourceType: aggregateOnly ? 'network-total' : 'store-detail',
-    isNetworkTotalOnly: aggregateOnly
+    sourceType: 'store-detail',
+    isNetworkTotalOnly: false
   };
 }
 
@@ -533,67 +513,23 @@ function historyRecordKey(record) {
   return [monthKey, week, network, store].join('|');
 }
 
-function historyMonthNetworkKey(record) {
-  if (!record) return '';
-  const monthKey = record.monthKey || inferRecordMonthKey(record);
-  const network = normalizeNetworkName(record.rede || '');
-  return [monthKey, network].join('|');
-}
-
-function historyGlobalPeriodKey(record) {
-  if (!record) return '';
-  const monthKey = record.monthKey || inferRecordMonthKey(record);
-  const week = String(record.semana || record.weekLabel || '').trim();
-  return [monthKey, week].join('|');
-}
-
-function removeAggregateRowsFromStoreData() {
-  if (!Array.isArray(appState.storeData) || !appState.storeData.length) return false;
-  const before = appState.storeData.length;
-  appState.storeData = appState.storeData.filter(item => !isAggregateStoreRecord(item));
-  return appState.storeData.length !== before;
-}
-
 function mergePreloadedHistory() {
   const seed = window.__SOFOLHAS_PRELOADED_HISTORY__;
   if (!seed || !Array.isArray(seed.records) || !seed.records.length) return false;
   const version = String(seed.version || HISTORY_SEED_VERSION);
-  const seedGeneratedAt = new Date(seed.generatedAt || 0).getTime() || 0;
+  if (appState.config.historySeedVersion === version) return false;
 
   const seededRecords = seed.records.map(normalizeStoredStoreRecord);
-  const seededMonthNetworks = new Set(seededRecords.map(historyMonthNetworkKey).filter(Boolean));
+  const seededKeys = new Set(seededRecords.map(historyRecordKey).filter(Boolean));
 
-  // Uma importação por loja feita DEPOIS da geração da carga embarcada é uma
-  // fotografia mais nova da semana e deve substituir a semana correspondente.
-  const newerManualPeriods = new Set(
-    appState.storeImports
-      .filter(batch => batch && !batch.isPreloadedHistory && !batch.historySource)
-      .filter(batch => (new Date(batch.importedAt || 0).getTime() || 0) > seedGeneratedAt)
-      .map(batch => historyGlobalPeriodKey({
-        monthKey: batch.monthKey || inferRecordMonthKey(batch),
-        semana: batch.weekLabel || ''
-      }))
-      .filter(Boolean)
-  );
-
-  // A carga embarcada é a referência oficial do histórico até o momento em
-  // que foi gerada. Registros antigos do Firebase para o mesmo mês/rede são
-  // removidos para impedir duplicidade (ex.: CONSIGNADOS somado duas vezes).
-  // Importações posteriores à carga continuam preservadas normalmente.
+  // Na primeira migração, a base histórica fornecida substitui registros do
+  // mesmo mês + semana + rede + loja. Depois disso, novas importações do ADM
+  // prevalecem, porque a versão da migração fica salva no Firebase/localStorage.
   appState.storeData = appState.storeData.filter(item => {
-    if (!item) return false;
-    const importedAt = new Date(item.dataImportacao || item.importedAt || 0).getTime() || 0;
-    const monthNetworkKey = historyMonthNetworkKey(item);
-    const globalPeriodKey = historyGlobalPeriodKey(item);
-
-    if (item.historySource || item.isPreloadedHistory) return false;
-    if (newerManualPeriods.has(globalPeriodKey)) return true;
-    if (seededMonthNetworks.has(monthNetworkKey) && importedAt <= seedGeneratedAt) return false;
-    return true;
+    if (item?.historySource) return false;
+    return !seededKeys.has(historyRecordKey(item));
   });
-
-  appState.storeData.push(...seededRecords.filter(item => !newerManualPeriods.has(historyGlobalPeriodKey(item))));
-  removeAggregateRowsFromStoreData();
+  appState.storeData.push(...seededRecords);
 
   const seedBatches = (seed.batches || []).map(normalizeStoredImport);
   const seedBatchIds = new Set(seedBatches.map(item => item.id));
@@ -603,77 +539,21 @@ function mergePreloadedHistory() {
   ].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
 
   appState.config.historySeedVersion = version;
-  appState.config.historySeededAt = seed.generatedAt || appState.config.historySeededAt || new Date().toISOString();
+  appState.config.historySeededAt = new Date().toISOString();
+  appState.config.ultimaAtualizacao = new Date().toISOString();
   if (!appState.config.ultimaImportacao) appState.config.ultimaImportacao = seed.generatedAt || new Date().toISOString();
   return true;
 }
 
 
-function init() {
+
+async function init() {
   cacheElements();
-
-  // Inicialização local primeiro: o painel fica funcional imediatamente,
-  // mesmo se Firebase/CDN estiver lento ou indisponível.
-  const saved = readStorage();
-  applyPersistedState(saved);
-  mergePreloadedHistory();
-
+  await seedInitialState();
   buildMetaInputs();
-  buildMonthlyGoalInputs();
   initCustomSelects();
   bindEvents();
-  firebaseBridge.initialLoadComplete = true;
   refreshAll();
-
-  // Garante uma cópia local da base histórica antes de qualquer chamada remota.
-  persistLocal({ skipRemote: true });
-
-  // Firebase passa a sincronizar em segundo plano e nunca bloqueia botões/dados.
-  syncRemoteStateInBackground(saved);
-}
-
-async function syncRemoteStateInBackground(saved) {
-  const firebaseReady = await initFirebaseBridge();
-  if (!firebaseReady) return;
-
-  let remoteState = null;
-  try {
-    remoteState = await Promise.race([
-      loadRemoteStateOnce(),
-      new Promise(resolve => setTimeout(() => resolve(null), 4000))
-    ]);
-  } catch (error) {
-    console.error('Falha na sincronização inicial em segundo plano:', error);
-  }
-
-  const hasRemoteState = remoteState && (
-    Array.isArray(remoteState.data) ||
-    Array.isArray(remoteState.storeData) ||
-    Array.isArray(remoteState.imports) ||
-    Array.isArray(remoteState.storeImports) ||
-    remoteState.config
-  );
-
-  if (hasRemoteState) {
-    applyPersistedState(remoteState);
-    // A carga embarcada sempre completa versões remotas antigas/incompletas.
-    mergePreloadedHistory();
-    firebaseBridge.lastSyncedHash = getStateHash(remoteState);
-    persistLocal({ skipRemote: true });
-
-    syncLojaOptions();
-    syncMesOptions();
-    syncSemanaOptions();
-    buildMetaInputs();
-    buildMonthlyGoalInputs();
-    refreshAll();
-    renderImportBatchesTable();
-    renderStoreImportBatchesTable();
-    renderAdminTable();
-  } else if (saved || appState.data.length || appState.storeData.length) {
-    // Se não houver estado remoto disponível, mantém o local e tenta publicá-lo.
-    queueRemotePersist();
-  }
 }
 
 function cacheElements() {
@@ -696,10 +576,6 @@ function cacheElements() {
     metaGeralInput: document.getElementById('metaGeralInput'),
     metasRedeForm: document.getElementById('metasRedeForm'),
     saveGoalsBtn: document.getElementById('saveGoalsBtn'),
-    monthlyGoalYearInput: document.getElementById('monthlyGoalYearInput'),
-    monthlyGoalsForm: document.getElementById('monthlyGoalsForm'),
-    saveMonthlyGoalsBtn: document.getElementById('saveMonthlyGoalsBtn'),
-    monthlyGoalsFeedback: document.getElementById('monthlyGoalsFeedback'),
     excelFileInput: document.getElementById('excelFileInput'),
     monthInput: document.getElementById('monthInput'),
     weekInput: document.getElementById('weekInput'),
@@ -816,34 +692,6 @@ function defaultMetasPorRede() {
   };
 }
 
-function normalizeMonthlyGoals(source = {}) {
-  return Object.fromEntries(
-    Object.entries(source || {})
-      .filter(([key]) => /^\d{4}-\d{2}$/.test(String(key)))
-      .map(([key, value]) => [key, Math.max(0, Number(value || 0))])
-      .filter(([, value]) => Number.isFinite(value) && value > 0)
-  );
-}
-
-function getMonthlyCompanyMeta(monthKey) {
-  if (!monthKey || monthKey === 'Todas') return 0;
-  return Math.max(0, Number(appState.config.metasPorMes?.[monthKey] || 0));
-}
-
-function getActiveMetaMonthKey(filtered = []) {
-  if (appState.filters.mes !== 'Todas') return appState.filters.mes;
-  const monthKeys = [...new Set((filtered || []).map(item => item.monthKey || inferRecordMonthKey(item)).filter(Boolean))];
-  if (monthKeys.length === 1) return monthKeys[0];
-  return getLatestImportMonthKey();
-}
-
-function getImportedWeekCountForMonth(monthKey) {
-  if (!monthKey) return 1;
-  const source = getMonthlyNetworkBase(monthKey);
-  const weeks = [...new Set(source.map(item => item.semana).filter(week => week && !String(week).toLowerCase().includes('fechamento mensal')))];
-  return Math.max(1, weeks.length);
-}
-
 function calculateMetaGeralFromNetworks(source = appState.config.metasPorRede) {
   return NETWORKS.reduce((total, network) => total + Number(source?.[network.id] || 0), 0);
 }
@@ -931,64 +779,6 @@ function buildMetaInputs() {
     input.addEventListener('input', () => syncMetaGeralInputFromNetworkInputs());
     input.addEventListener('blur', () => syncMetaGeralInputFromNetworkInputs());
   });
-}
-
-function getMonthlyGoalEditorYear() {
-  const inputYear = Number(els.monthlyGoalYearInput?.value || 0);
-  if (Number.isInteger(inputYear) && inputYear >= 2020 && inputYear <= 2100) return inputYear;
-  const activeMonth = appState.filters.mes !== 'Todas' ? appState.filters.mes : getLatestImportMonthKey();
-  const year = Number(String(activeMonth || '').split('-')[0]);
-  return Number.isInteger(year) && year >= 2020 ? year : new Date().getFullYear();
-}
-
-function buildMonthlyGoalInputs() {
-  if (!els.monthlyGoalYearInput || !els.monthlyGoalsForm) return;
-  if (!els.monthlyGoalYearInput.value) els.monthlyGoalYearInput.value = String(getMonthlyGoalEditorYear());
-  const year = getMonthlyGoalEditorYear();
-  els.monthlyGoalYearInput.value = String(year);
-  els.monthlyGoalsForm.innerHTML = MONTH_OPTIONS.map(month => {
-    const monthKey = `${year}-${month.value}`;
-    const value = getMonthlyCompanyMeta(monthKey);
-    return `
-      <div class="field monthly-goal-field">
-        <label for="meta-month-${monthKey}">${month.label}/${year}</label>
-        <input id="meta-month-${monthKey}" data-month-key="${monthKey}" data-currency="true" type="text" inputmode="decimal" autocomplete="off" placeholder="Meta não cadastrada" />
-      </div>`;
-  }).join('');
-
-  [...els.monthlyGoalsForm.querySelectorAll('input[data-month-key]')].forEach(input => {
-    const value = getMonthlyCompanyMeta(input.dataset.monthKey);
-    if (value > 0) setCurrencyInputValue(input, value);
-    attachCurrencyMask(input);
-  });
-  if (els.monthlyGoalsFeedback) {
-    els.monthlyGoalsFeedback.textContent = '';
-    els.monthlyGoalsFeedback.className = 'feedback';
-  }
-}
-
-function saveMonthlyGoals() {
-  if (!els.monthlyGoalsForm) return;
-  const inputs = [...els.monthlyGoalsForm.querySelectorAll('input[data-month-key]')];
-  if (!appState.config.metasPorMes || typeof appState.config.metasPorMes !== 'object') appState.config.metasPorMes = {};
-  inputs.forEach(input => {
-    const value = parseCurrencyInput(input.value);
-    const key = input.dataset.monthKey;
-    if (value > 0) {
-      appState.config.metasPorMes[key] = value;
-      setCurrencyInputValue(input, value);
-    } else {
-      delete appState.config.metasPorMes[key];
-      input.value = '';
-    }
-  });
-  appState.config.ultimaAtualizacao = new Date().toISOString();
-  persistLocal();
-  refreshAll();
-  if (els.monthlyGoalsFeedback) {
-    els.monthlyGoalsFeedback.textContent = `Metas mensais de ${getMonthlyGoalEditorYear()} salvas.`;
-    els.monthlyGoalsFeedback.className = 'feedback is-success';
-  }
 }
 
 function initCustomSelects() {
@@ -1110,8 +900,6 @@ function bindEvents() {
   if (els.toggleDetailsBtn) els.toggleDetailsBtn.addEventListener('click', toggleDetailsSection);
   if (els.closeAdmModalBtn) els.closeAdmModalBtn.addEventListener('click', closeAdmModal);
   if (els.saveGoalsBtn) els.saveGoalsBtn.addEventListener('click', saveGoals);
-  if (els.saveMonthlyGoalsBtn) els.saveMonthlyGoalsBtn.addEventListener('click', saveMonthlyGoals);
-  if (els.monthlyGoalYearInput) els.monthlyGoalYearInput.addEventListener('change', buildMonthlyGoalInputs);
   if (els.importExcelBtn) els.importExcelBtn.addEventListener('click', importExcelFile);
   if (els.importStoreExcelBtn) els.importStoreExcelBtn.addEventListener('click', importStoreExcelFile);
   if (els.importBatchesTableBody) els.importBatchesTableBody.addEventListener('click', handleImportBatchAction);
@@ -1166,7 +954,7 @@ function openAuthModal() {
 function closeAuthModal() { els.authModal.hidden = true; }
 
 function setAdmTab(tab) {
-  appState.admTab = tab || 'metas-mensais';
+  appState.admTab = tab || 'metas';
   if (!els.admNavItems?.length || !els.admPanels?.length) return;
   els.admNavItems.forEach(button => button.classList.toggle('is-active', button.dataset.admTab === appState.admTab));
   els.admPanels.forEach(panel => {
@@ -1178,11 +966,10 @@ function setAdmTab(tab) {
 
 function openAdmModal() {
   buildMetaInputs();
-  buildMonthlyGoalInputs();
   renderImportBatchesTable();
   renderStoreImportBatchesTable();
   renderAdminTable();
-  setAdmTab(appState.admTab || 'metas-mensais');
+  setAdmTab(appState.admTab || 'metas');
   els.admModal.hidden = false;
 }
 function closeAdmModal() { els.admModal.hidden = true; }
@@ -1990,8 +1777,8 @@ function getRankingStatus(value, hasBreak = true) {
 function renderRankingTable(filtered) {
   const monthlyRecords = getDisplayRecords(filtered);
   const fullAggregated = aggregateByStore(monthlyRecords).sort((a, b) => {
-    const aHas = hasBreakTrackingForStore(a.rede, a.loja, monthKey);
-    const bHas = hasBreakTrackingForStore(b.rede, b.loja, monthKey);
+    const aHas = hasBreakTrackingForStore(a.rede, a.loja);
+    const bHas = hasBreakTrackingForStore(b.rede, b.loja);
     if (aHas !== bHas) return aHas ? -1 : 1;
     if (!aHas && !bHas) return b.valorVenda - a.valorVenda;
     const aScore = Number(a.percentualQuebra || 0);
@@ -2232,14 +2019,10 @@ function renderTopInfo(filtered) {
   const totalStock = getLatestCostaStockTotal(displayRecords);
 
   if (els.lastUpdateText) els.lastUpdateText.textContent = `Última atualização: ${formatDateTime(appState.config.ultimaAtualizacao)}`;
-  const activeMetaMonthKey = getActiveMetaMonthKey(displayRecords);
-  const hasMetaTarget = metaTarget > 0;
-  els.metaPercent.textContent = hasMetaTarget ? `${metaPercent.toFixed(0)}%` : '—';
-  els.metaPercentInner.textContent = hasMetaTarget ? `${metaPercent.toFixed(0)}%` : '—';
-  els.metaLegend.textContent = hasMetaTarget
-    ? `Venda atual ${formatCurrency(totals.venda)} de ${formatCurrency(metaTarget)}`
-    : `Meta de ${formatMonthFilterLabel(activeMetaMonthKey)} não cadastrada no ADM`;
-  els.metaTotalValue.textContent = hasMetaTarget ? formatCurrency(metaTarget) : '—';
+  els.metaPercent.textContent = `${metaPercent.toFixed(0)}%`;
+  els.metaPercentInner.textContent = `${metaPercent.toFixed(0)}%`;
+  els.metaLegend.textContent = `Venda atual ${formatCurrency(totals.venda)} de ${formatCurrency(metaTarget)}`;
+  els.metaTotalValue.textContent = formatCurrency(metaTarget);
   els.salesTotalValue.textContent = formatCurrency(totals.venda);
   els.lastImportValue.textContent = formatDateTime(appState.config.ultimaImportacao);
 
@@ -2590,33 +2373,21 @@ function getMonthlySummaryMonthKey() {
 }
 
 function getMonthlyNetworkBase(monthKey) {
-  // Quando existe detalhamento por loja para uma rede/mês, ele é a fonte
-  // principal do consolidado. A importação por rede entra apenas para redes
-  // que ainda não possuem detalhamento. Linhas agregadas (TOTAL DA REDE)
-  // nunca entram na base por loja.
-  const detailed = getMonthlyStoreBase(monthKey);
-  const detailedNetworks = new Set(detailed.map(item => normalizeNetworkName(item.rede)));
-
-  const networkOnlyFallback = appState.data.filter(item => {
+  const official = appState.data.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey);
+  const officialNetworks = new Set(official.map(item => item.rede));
+  const fallback = appState.storeData.filter(item => {
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
-    const normalizedNetwork = normalizeNetworkName(item.rede);
-    return sameMonth && !detailedNetworks.has(normalizedNetwork);
+    return sameMonth && !officialNetworks.has(item.rede);
   });
-
-  return [...detailed, ...networkOnlyFallback];
+  return [...official, ...fallback];
 }
 
 function getMonthlyStoreBase(monthKey, network = '') {
   return appState.storeData.filter(item => {
-    if (isAggregateStoreRecord(item)) return false;
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
     const sameNetwork = !network || item.rede === network;
     return sameMonth && sameNetwork;
   });
-}
-
-function isMonthlyOnlyRecord(item) {
-  return Boolean(item && (item.monthlyOnly === true || item.sourceGranularity === 'monthly'));
 }
 
 function aggregateMonthlyStoreDetails(records) {
@@ -2628,7 +2399,6 @@ function aggregateMonthlyStoreDetails(records) {
         rede: item.rede, loja: item.loja, valorVenda: 0, valorQuebra: 0,
         valorFalta: 0, valorQualidade: 0, valorRecebido: 0, valorEstoque: 0,
         hasFaltaData: false, hasQualidadeData: false, hasEstoqueData: false,
-        hasMonthlyOnlyData: false,
         weeks: new Set(), _latestWeek: -1, _latestImportedAt: 0
       });
     }
@@ -2641,12 +2411,8 @@ function aggregateMonthlyStoreDetails(records) {
     if (item.hasFaltaData !== false) row.hasFaltaData = true;
     if (item.hasQualidadeData !== false) row.hasQualidadeData = true;
     if (item.hasEstoqueData !== false) row.hasEstoqueData = true;
-    if (isMonthlyOnlyRecord(item)) {
-      row.hasMonthlyOnlyData = true;
-    } else {
-      row.weeks.add(item.semana);
-    }
-    const weekOrder = isMonthlyOnlyRecord(item) ? -1 : weekSortValue(item.semana);
+    row.weeks.add(item.semana);
+    const weekOrder = weekSortValue(item.semana);
     const importedAt = new Date(item.dataImportacao || item.importedAt || 0).getTime() || 0;
     if (weekOrder > row._latestWeek || (weekOrder === row._latestWeek && importedAt >= row._latestImportedAt)) {
       row.valorEstoque = Number(item.valorEstoque || 0);
@@ -2666,7 +2432,6 @@ function aggregateMonthlyStoreDetails(records) {
     hasFaltaData: row.hasFaltaData,
     hasQualidadeData: row.hasQualidadeData,
     hasEstoqueData: row.hasEstoqueData,
-    hasMonthlyOnlyData: row.hasMonthlyOnlyData,
     weekCount: row.weeks.size,
     percentualQuebra: row.valorVenda > 0 ? Number(((row.valorQuebra / row.valorVenda) * 100).toFixed(2)) : 0
   }));
@@ -2737,8 +2502,8 @@ function hasBreakTrackingForRecords(records) {
   });
 }
 
-function getBreakDisplayForStore(network, store, percent = 0, sale = 0, monthKey = '') {
-  const hasBreak = hasBreakTrackingForStore(network, store, monthKey);
+function getBreakDisplayForStore(network, store, percent = 0, sale = 0) {
+  const hasBreak = hasBreakTrackingForStore(network, store);
   return {
     hasBreak,
     status: hasBreak ? monthlyStatusInfo(percent, sale) : { label: 'Venda apenas', className: 'status--neutral' }
@@ -2779,42 +2544,6 @@ function getStoreMonthlyHistory(network, store) {
 
   return monthKeys.map(monthKey => {
     const records = getMonthlyStoreBase(monthKey, network).filter(item => item.loja === store);
-    const totals = aggregateRecords(records);
-    const hasBreak = hasBreakTrackingForRecords(records);
-    return {
-      monthKey,
-      monthLabel: formatMonthFilterLabel(monthKey),
-      venda: Number(totals.venda.toFixed(2)),
-      quebra: Number(totals.quebra.toFixed(2)),
-      percentualQuebra: hasBreak && totals.venda > 0 ? Number(((totals.quebra / totals.venda) * 100).toFixed(2)) : null,
-      hasBreak
-    };
-  });
-}
-
-// Base exclusiva para a curva histórica geral.
-// O detalhamento por loja é a fonte principal do histórico. Dados por rede
-// entram apenas quando não existe detalhamento daquela rede no mês. Isso
-// evita que uma importação antiga/parcial salva no Firebase substitua o
-// histórico completo de uma rede e derrube artificialmente o total do mês.
-function getCompanyHistoryBase(monthKey) {
-  const detailed = getMonthlyStoreBase(monthKey);
-  const detailedNetworks = new Set(detailed.map(item => normalizeNetworkName(item.rede)));
-  const networkOnly = appState.data.filter(item => {
-    if (!item || (item.monthKey || inferRecordMonthKey(item)) !== monthKey) return false;
-    return !detailedNetworks.has(normalizeNetworkName(item.rede));
-  });
-  return [...detailed, ...networkOnly];
-}
-
-function getCompanyMonthlyHistory() {
-  const monthKeys = [...new Set([...appState.data, ...appState.storeData]
-    .map(item => item?.monthKey || inferRecordMonthKey(item))
-    .filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
-
-  return monthKeys.map(monthKey => {
-    const records = getCompanyHistoryBase(monthKey);
     const totals = aggregateRecords(records);
     const hasBreak = hasBreakTrackingForRecords(records);
     return {
@@ -2896,7 +2625,8 @@ function renderMonthlyNetworks(monthKey) {
   destroyMonthlyStoreChart();
   destroyMonthlyNetworkHistoryChart();
 
-  let networkBase = getCompanyHistoryBase(monthKey);
+  let networkBase = getMonthlyStoreBase(monthKey);
+  if (!networkBase.length) networkBase = getMonthlyNetworkBase(monthKey);
   if (appState.filters.rede !== 'Todas') networkBase = networkBase.filter(item => item.rede === appState.filters.rede);
   const summaries = aggregateByNetwork(networkBase);
   const storeBase = getMonthlyStoreBase(monthKey);
@@ -2911,51 +2641,28 @@ function renderMonthlyNetworks(monthKey) {
     return;
   }
 
-  const history = getCompanyMonthlyHistory();
-  const historyHasBreak = history.some(item => item.hasBreak);
-
-  els.monthlySummaryBody.innerHTML = `
-    <article class="monthly-history-panel monthly-history-panel--company">
-      <div class="monthly-history-head">
-        <div>
-          <p class="eyebrow">Comparativo histórico</p>
-          <strong>Evolução mensal • Resumo Geral da Empresa</strong>
-        </div>
-        <span>${history.length ? `${history[0].monthLabel} → ${history[history.length - 1].monthLabel}` : 'Sem histórico'}</span>
+  els.monthlySummaryBody.innerHTML = `<div class="monthly-network-grid">${ordered.map(item => {
+    const stores = new Set(storeBase.filter(row => row.rede === item.rede).map(row => row.loja));
+    const percent = Number(item.percQuebra || 0);
+    const networkRecords = networkBase.filter(row => row.rede === item.rede);
+    const hasBreak = hasBreakTrackingForRecords(networkRecords);
+    const status = hasBreak ? monthlyStatusInfo(percent, item.venda) : { label: 'Venda apenas', className: 'status--neutral' };
+    const canOpen = stores.size > 0;
+    return `<button type="button" class="monthly-network-card ${canOpen ? '' : 'is-disabled'} ${hasBreak ? '' : 'monthly-network-card--sales-only'}" ${canOpen ? `data-monthly-network="${escapeHtml(item.rede)}"` : 'disabled'}>
+      <div class="monthly-network-card__top">
+        <span class="monthly-network-name">${escapeHtml(item.rede)}</span>
+        ${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}
       </div>
-      <div class="monthly-history-chart-wrap"><canvas id="monthlyNetworkHistoryChart"></canvas></div>
-      <div class="monthly-history-months">
-        ${history.map(item => `<div class="monthly-history-month ${item.monthKey === monthKey ? 'is-current' : ''}">
-          <span>${escapeHtml(item.monthLabel)}</span>
-          <strong>${formatCurrency(item.venda)}</strong>
-          ${item.hasBreak && item.percentualQuebra !== null ? `<small>${formatPercent(item.percentualQuebra)} quebra</small>` : '<small>Venda apenas</small>'}
-        </div>`).join('')}
+      <strong class="monthly-network-percent">${hasBreak ? formatPercent(percent) : formatCurrency(item.venda)}</strong>
+      <span class="monthly-network-caption">${hasBreak ? 'quebra no mês' : 'venda no mês'}</span>
+      <div class="monthly-network-metrics">
+        <span><small>Venda</small><b>${formatCurrency(item.venda)}</b></span>
+        ${hasBreak ? `<span><small>Quebra</small><b>${formatCurrency(item.quebra)}</b></span>` : ''}
+        <span><small>Lojas</small><b>${stores.size || '—'}</b></span>
       </div>
-    </article>
-    <div class="monthly-network-grid">${ordered.map(item => {
-      const stores = new Set(storeBase.filter(row => row.rede === item.rede).map(row => row.loja));
-      const percent = Number(item.percQuebra || 0);
-      const networkRecords = networkBase.filter(row => row.rede === item.rede);
-      const hasBreak = hasBreakTrackingForRecords(networkRecords);
-      const status = hasBreak ? monthlyStatusInfo(percent, item.venda) : { label: 'Venda apenas', className: 'status--neutral' };
-      const canOpen = stores.size > 0;
-      return `<button type="button" class="monthly-network-card ${canOpen ? '' : 'is-disabled'} ${hasBreak ? '' : 'monthly-network-card--sales-only'}" ${canOpen ? `data-monthly-network="${escapeHtml(item.rede)}"` : 'disabled'}>
-        <div class="monthly-network-card__top">
-          <span class="monthly-network-name">${escapeHtml(item.rede)}</span>
-          ${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}
-        </div>
-        <strong class="monthly-network-percent">${hasBreak ? formatPercent(percent) : formatCurrency(item.venda)}</strong>
-        <span class="monthly-network-caption">${hasBreak ? 'quebra no mês' : 'venda no mês'}</span>
-        <div class="monthly-network-metrics">
-          <span><small>Venda</small><b>${formatCurrency(item.venda)}</b></span>
-          ${hasBreak ? `<span><small>Quebra</small><b>${formatCurrency(item.quebra)}</b></span>` : ''}
-          <span><small>Lojas</small><b>${stores.size || '—'}</b></span>
-        </div>
-        <span class="monthly-network-action">${canOpen ? 'Ver lojas e histórico →' : 'Importe a base por loja'}</span>
-      </button>`;
-    }).join('')}</div>`;
-
-  renderMonthlyNetworkHistoryChart(history, historyHasBreak);
+      <span class="monthly-network-action">${canOpen ? 'Ver lojas e histórico →' : 'Importe a base por loja'}</span>
+    </button>`;
+  }).join('')}</div>`;
 }
 
 function renderMonthlyNetworkStores(monthKey, network) {
@@ -2977,12 +2684,12 @@ function renderMonthlyNetworkStores(monthKey, network) {
 
   const total = stores.reduce((acc, row) => {
     acc.venda += row.valorVenda;
-    if (hasBreakTrackingForStore(row.rede, row.loja, monthKey)) acc.quebra += row.valorQuebra;
+    if (hasBreakTrackingForStore(row.rede, row.loja)) acc.quebra += row.valorQuebra;
     return acc;
   }, { venda: 0, quebra: 0 });
-  const networkHasBreak = stores.some(row => hasBreakTrackingForStore(row.rede, row.loja, monthKey));
+  const networkHasBreak = stores.some(row => hasBreakTrackingForStore(row.rede, row.loja));
   const perc = networkHasBreak && total.venda > 0 ? (total.quebra / total.venda) * 100 : 0;
-  const breakStores = stores.filter(row => hasBreakTrackingForStore(row.rede, row.loja, monthKey));
+  const breakStores = stores.filter(row => hasBreakTrackingForStore(row.rede, row.loja));
   const worst = breakStores.length ? [...breakStores].sort((a, b) => b.percentualQuebra - a.percentualQuebra)[0] : null;
   const showStock = network === 'COSTA';
   const history = getNetworkMonthlyHistory(network);
@@ -3016,19 +2723,19 @@ function renderMonthlyNetworkStores(monthKey, network) {
 
     <div class="table-wrap monthly-store-table-wrap">
       <table class="monthly-store-table">
-        <thead><tr><th>Loja</th><th>Venda mês</th>${networkHasBreak ? '<th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>' : ''}${showStock ? '<th>Estoque atual</th>' : ''}<th>Semanas</th><th></th></tr></thead>
+        <thead><tr><th>Loja</th><th>Venda mês</th><th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>${showStock ? '<th>Estoque atual</th>' : ''}<th>Semanas</th><th></th></tr></thead>
         <tbody>${stores.map(item => {
-          const display = getBreakDisplayForStore(item.rede, item.loja, item.percentualQuebra, item.valorVenda, monthKey);
+          const display = getBreakDisplayForStore(item.rede, item.loja, item.percentualQuebra, item.valorVenda);
           return `<tr class="monthly-store-row ${display.hasBreak ? '' : 'monthly-store-row--sales-only'}" data-monthly-store="${escapeHtml(item.loja)}">
             <td><strong>${escapeHtml(item.loja)}</strong><br>${display.hasBreak ? `<span class="status-badge ${display.status.className}">${display.status.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}</td>
             <td>${formatCurrency(item.valorVenda)}</td>
-            ${networkHasBreak ? `<td>${display.hasBreak ? formatCurrency(item.valorQuebra) : '—'}</td>
+            <td>${display.hasBreak ? formatCurrency(item.valorQuebra) : '—'}</td>
             <td>${display.hasBreak ? `<strong>${formatPercent(item.percentualQuebra)}</strong>` : '—'}</td>
             <td>${display.hasBreak && item.hasFaltaData ? formatCurrency(item.valorFalta) : '—'}</td>
-            <td>${display.hasBreak && item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>` : ''}
+            <td>${display.hasBreak && item.hasQualidadeData ? formatCurrency(item.valorQualidade) : '—'}</td>
             ${showStock ? `<td>${item.hasEstoqueData ? formatCurrency(item.valorEstoque) : '—'}</td>` : ''}
-            <td>${item.weekCount || '—'}</td>
-            <td><button type="button" class="btn btn--ghost btn--sm" data-monthly-store="${escapeHtml(item.loja)}">${item.weekCount ? 'Semanas →' : 'Fechamento →'}</button></td>
+            <td>${item.weekCount}</td>
+            <td><button type="button" class="btn btn--ghost btn--sm" data-monthly-store="${escapeHtml(item.loja)}">Semanas →</button></td>
           </tr>`;
         }).join('')}</tbody>
       </table>
@@ -3120,29 +2827,28 @@ function renderMonthlyNetworkHistoryChart(history, hasBreak) {
 function renderMonthlyStoreWeeks(monthKey, network, store) {
   destroyMonthlyNetworkHistoryChart();
   const records = getMonthlyStoreBase(monthKey, network).filter(item => item.loja === store);
-  const weeklyRecords = records.filter(item => !isMonthlyOnlyRecord(item));
-  const weeks = aggregateWeeklyStoreDetails(weeklyRecords);
-
-  if (!records.length) {
-    els.monthlySummaryBody.innerHTML = '<div class="monthly-empty">Nenhum resultado encontrado para esta loja.</div>';
+  const weeks = aggregateWeeklyStoreDetails(records);
+  if (!weeks.length) {
+    els.monthlySummaryBody.innerHTML = '<div class="monthly-empty">Nenhum resultado semanal encontrado para esta loja.</div>';
     destroyMonthlyStoreChart();
     return;
   }
 
-  const hasBreak = hasBreakTrackingForStore(network, store, monthKey);
-  const rawTotals = aggregateRecords(records);
-  const totals = {
-    venda: Number(rawTotals.venda || 0),
-    quebra: hasBreak ? Number(rawTotals.quebra || 0) : 0,
-    falta: hasBreak ? Number(rawTotals.falta || 0) : 0,
-    qualidade: hasBreak ? Number(rawTotals.qualidade || 0) : 0
-  };
+  const hasBreak = hasBreakTrackingForStore(network, store);
+  const totals = weeks.reduce((acc, row) => {
+    acc.venda += row.valorVenda;
+    if (hasBreak) {
+      acc.quebra += row.valorQuebra;
+      acc.falta += row.valorFalta;
+      acc.qualidade += row.valorQualidade;
+    }
+    return acc;
+  }, { venda: 0, quebra: 0, falta: 0, qualidade: 0 });
   const percent = hasBreak && totals.venda > 0 ? (totals.quebra / totals.venda) * 100 : 0;
   const status = hasBreak ? monthlyStatusInfo(percent, totals.venda) : { label: 'Venda apenas', className: 'status--neutral' };
   const showStock = network === 'COSTA';
   const history = getStoreMonthlyHistory(network, store);
   const historyHasBreak = history.some(item => item.hasBreak);
-  const monthlyOnly = records.some(isMonthlyOnlyRecord) && !weeks.length;
 
   els.monthlySummaryBody.innerHTML = `
     <div class="monthly-store-title">
@@ -3153,7 +2859,7 @@ function renderMonthlyStoreWeeks(monthKey, network, store) {
       <div class="monthly-kpi"><span>Venda no mês</span><strong>${formatCurrency(totals.venda)}</strong></div>
       ${hasBreak ? `<div class="monthly-kpi"><span>Quebra no mês</span><strong>${formatCurrency(totals.quebra)}</strong></div>
       <div class="monthly-kpi"><span>% Quebra</span><strong>${formatPercent(percent)}</strong></div>` : ''}
-      <div class="monthly-kpi"><span>Detalhamento</span><strong>${weeks.length ? `${weeks.length} semana${weeks.length === 1 ? '' : 's'}` : 'Mensal'}</strong></div>
+      <div class="monthly-kpi"><span>Semanas importadas</span><strong>${weeks.length}</strong></div>
     </div>
 
     <article class="monthly-history-panel monthly-history-panel--store">
@@ -3174,43 +2880,31 @@ function renderMonthlyStoreWeeks(monthKey, network, store) {
       </div>
     </article>
 
-    ${monthlyOnly ? `
-      <div class="monthly-empty">
-        <strong>Fechamento mensal disponível.</strong><br>
-        A planilha de origem deste período informa o total mensal da loja, mas não possui a divisão semana a semana.
-      </div>
-    ` : `
-      <div class="monthly-store-detail-grid">
-        <article class="monthly-chart-panel">
-          <div class="monthly-chart-head">
-            <strong>Evolução semanal</strong>
-            <span>${hasBreak ? 'Venda × % de quebra' : 'Venda por semana'}</span>
-          </div>
-          <div class="monthly-chart-wrap"><canvas id="monthlyStoreTrendChart"></canvas></div>
-        </article>
-        <div class="table-wrap">
-          <table class="monthly-week-table">
-            <thead><tr><th>Semana</th><th>Venda</th>${hasBreak ? `<th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>` : ''}${showStock ? '<th>Estoque</th>' : ''}</tr></thead>
-            <tbody>${weeks.map(row => `<tr>
-              <td><strong>${escapeHtml(row.semana)}</strong></td>
-              <td>${formatCurrency(row.valorVenda)}</td>
-              ${hasBreak ? `<td>${formatCurrency(row.valorQuebra)}</td>
-              <td><strong>${formatPercent(row.percentualQuebra)}</strong></td>
-              <td>${row.hasFaltaData ? formatCurrency(row.valorFalta) : '—'}</td>
-              <td>${row.hasQualidadeData ? formatCurrency(row.valorQualidade) : '—'}</td>` : ''}
-              ${showStock ? `<td>${row.hasEstoqueData ? formatCurrency(row.valorEstoque) : '—'}</td>` : ''}
-            </tr>`).join('')}</tbody>
-          </table>
+    <div class="monthly-store-detail-grid">
+      <article class="monthly-chart-panel">
+        <div class="monthly-chart-head">
+          <strong>Evolução semanal</strong>
+          <span>${hasBreak ? 'Venda × % de quebra' : 'Venda por semana'}</span>
         </div>
+        <div class="monthly-chart-wrap"><canvas id="monthlyStoreTrendChart"></canvas></div>
+      </article>
+      <div class="table-wrap">
+        <table class="monthly-week-table">
+          <thead><tr><th>Semana</th><th>Venda</th>${hasBreak ? `<th>Quebra</th><th>% Quebra</th><th>Falta</th><th>Qualidade</th>` : ''}${showStock ? '<th>Estoque</th>' : ''}</tr></thead>
+          <tbody>${weeks.map(row => `<tr>
+            <td><strong>${escapeHtml(row.semana)}</strong></td>
+            <td>${formatCurrency(row.valorVenda)}</td>
+            ${hasBreak ? `<td>${formatCurrency(row.valorQuebra)}</td>
+            <td><strong>${formatPercent(row.percentualQuebra)}</strong></td>
+            <td>${row.hasFaltaData ? formatCurrency(row.valorFalta) : '—'}</td>
+            <td>${row.hasQualidadeData ? formatCurrency(row.valorQualidade) : '—'}</td>` : ''}
+            ${showStock ? `<td>${row.hasEstoqueData ? formatCurrency(row.valorEstoque) : '—'}</td>` : ''}
+          </tr>`).join('')}</tbody>
+        </table>
       </div>
-    `}`;
-
+    </div>`;
   renderMonthlyNetworkHistoryChart(history, historyHasBreak);
-  if (weeks.length) {
-    renderMonthlyStoreTrendChart(weeks, hasBreak);
-  } else {
-    destroyMonthlyStoreChart();
-  }
+  renderMonthlyStoreTrendChart(weeks, hasBreak);
 }
 
 function renderMonthlyStoreTrendChart(weeks, hasBreak = true) {
@@ -3427,22 +3121,18 @@ function updateViewHeader(filtered, totals) {
 }
 
 function resolveActiveMetaTarget(filtered) {
+  if (appState.filters.rede !== 'Todas') {
+    return appState.config.metasPorRede[appState.filters.rede] || 0;
+  }
   if (appState.filters.loja !== 'Todas') {
     const store = filtered[0];
     return store ? getStoreMeta(store.rede, store.loja) : 0;
   }
-  if (appState.filters.rede !== 'Todas') {
-    return appState.config.metasPorRede[appState.filters.rede] || 0;
+  if ((appState.filters.semana !== 'Todas' || appState.filters.mes !== 'Todas') && filtered.length) {
+    const uniqueWeeks = [...new Set(appState.data.map(item => item.semana))].length || 1;
+    return (appState.config.metaGeral || 0) / uniqueWeeks;
   }
-
-  const monthKey = getActiveMetaMonthKey(filtered);
-  const monthlyMeta = getMonthlyCompanyMeta(monthKey);
-  if (monthlyMeta <= 0) return 0;
-
-  if (appState.filters.semana !== 'Todas') {
-    return monthlyMeta / getImportedWeekCountForMonth(monthKey);
-  }
-  return monthlyMeta;
+  return appState.config.metaGeral || 0;
 }
 
 function getRowMeta(item) {

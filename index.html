@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Só Folhas Hortifruti | Dashboard Comercial</title>
-  <link rel="stylesheet" href="style.css?v=20260831-dados-v11" />
+  <link rel="stylesheet" href="style.css?v=20260830-drilldown-v2" />
 </head>
 <body>
   <div class="app-shell">
@@ -398,39 +398,17 @@
       <div class="modal__body modal__body--stacked">
         <div class="adm-shell">
           <nav class="adm-nav" aria-label="Seções administrativas">
-            <button type="button" class="adm-nav__item is-active" data-adm-tab="metas-mensais">Metas Mensais</button>
-            <button type="button" class="adm-nav__item" data-adm-tab="metas">Metas por Rede</button>
+            <button type="button" class="adm-nav__item is-active" data-adm-tab="metas">Metas</button>
             <button type="button" class="adm-nav__item" data-adm-tab="importacao">Importações</button>
             <button type="button" class="adm-nav__item" data-adm-tab="historico">Histórico</button>
             <button type="button" class="adm-nav__item" data-adm-tab="registros">Registros</button>
           </nav>
 
           <div class="adm-panels">
-            <section class="adm-panel is-active" data-adm-panel="metas-mensais">
-              <section class="card admin-card admin-card--full">
-                <div class="section-head">
-                  <div>
-                    <p class="eyebrow">Meta oficial da empresa</p>
-                    <h4>Metas de venda por mês</h4>
-                    <p class="section-note">Cadastre a meta total de cada mês. O Resumo Geral usa a meta do mês visualizado e deixa de usar a meta fixa de R$ 1.000.000,00.</p>
-                  </div>
-                </div>
-                <div class="field monthly-goal-year">
-                  <label for="monthlyGoalYearInput">Ano de referência</label>
-                  <input id="monthlyGoalYearInput" type="number" min="2020" max="2100" step="1" value="2026" />
-                </div>
-                <div id="monthlyGoalsForm" class="admin-grid monthly-goals-grid"></div>
-                <div class="admin-actions">
-                  <button id="saveMonthlyGoalsBtn" class="btn btn--primary" type="button">Salvar metas mensais</button>
-                  <span id="monthlyGoalsFeedback" class="feedback" aria-live="polite"></span>
-                </div>
-              </section>
-            </section>
-
-            <section class="adm-panel" data-adm-panel="metas" hidden>
+            <section class="adm-panel is-active" data-adm-panel="metas">
               <section class="card admin-card">
                 <div class="section-head">
-                  <h4>Metas por Rede</h4>
+                  <h4>Metas</h4>
                 </div>
                 <div class="field">
                   <label for="metaGeralInput">Meta total de venda</label>
@@ -639,7 +617,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
-  <script src="historico-2026.js?v=20260831-dados-v11"></script>
-  <script src="script.js?v=20260831-dados-v11"></script>
+  <script src="historico-2026.js?v=20260830-drilldown-v2"></script>
+  <script src="script.js?v=20260830-drilldown-v2"></script>
 </body>
 </html>

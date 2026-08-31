@@ -1,6 +1,6 @@
-DASHBOARD COMERCIAL SÓ FOLHAS — V7 — HISTÓRICO COMPLETADO JAN/2026 A AGO/2026 (3ª SEMANA)
+DASHBOARD COMERCIAL SÓ FOLHAS — HISTÓRICO JAN/2026 A AGO/2026 (3ª SEMANA) — V2 DRILL-DOWN
 
-ARQUIVOS PARA SUBIR
+ARQUIVOS PARA SUBIR:
 - index.html
 - script.js
 - style.css
@@ -8,92 +8,48 @@ ARQUIVOS PARA SUBIR
 - historico-2026.js
 - manter a pasta assets já existente no servidor
 
-O QUE FOI COMPLETADO
-1. VARIADOS foi separado corretamente de CONSIGNADOS.
-   - ECONOMART - LEM, ECONOMART - BARREIRAS e CERRAMIX ficam em CONSIGNADOS.
-   - As demais lojas da planilha VARIADOS ficam em VARIADOS.
-   - Lojas iniciadas por NOSSA KAZA ficam na rede NOSSA KAZA.
-2. VARIADOS recebeu histórico de venda de janeiro a agosto/2026.
-   - Janeiro a julho: fechamento mensal por loja, pois a fonte não traz divisão semanal nesses meses.
-   - Agosto: 1ª, 2ª e 3ª semanas por loja.
-3. NOSSA KAZA recebeu histórico a partir de abril/2026.
-   - Abril a julho: fechamento mensal por loja.
-   - Agosto: 1ª, 2ª e 3ª semanas por loja.
-4. ASSAÍ recebeu os dados que faltavam de janeiro a maio.
-   - Janeiro a maio: venda mensal por loja, sem quebra e sem divisão semanal na fonte.
-   - Junho e julho: histórico semanal existente.
-   - Agosto: refeito pelas três tabelas semanais, mantendo R$ 233.702,20 de venda e R$ 32.898,80 de quebra.
-5. CONSIGNADOS foi corrigido e completado.
-   - Julho tinha quatro semanas somando abaixo do fechamento mensal.
-   - A diferença exata foi registrada como 5ª semana por loja, fechando julho em R$ 73.330,87 de venda e R$ 5.862,15 de quebra.
-6. BRETAS passou a ter detalhamento por loja nas três primeiras semanas de agosto.
-7. Agosto foi revalidado pelas tabelas semanais.
-   - DIA A DIA usa QUEBRA REAL.
-   - COMPER/FORT usa QUEBRA PARCIAL como quebra real, mantendo Falta e Qualidade separadas.
-   - COSTA preserva Venda e Quebra da tabela COSTA REUNIÃO e recebe Estoque, Falta e Qualidade por loja/semana das tabelas semanais.
+ALTERAÇÕES DESTA VERSÃO
+1. Clique em REDE no Resumo Mensal passa a aplicar a rede como contexto do dashboard inteiro.
+   - Rankings, cards, gráficos, alertas e detalhamentos passam a mostrar somente a rede clicada.
+2. Clique em LOJA passa a aplicar a loja como contexto do dashboard inteiro.
+   - Os demais dados de outras lojas/redes deixam de aparecer enquanto a loja estiver selecionada.
+3. Ao abrir uma REDE, aparece uma curva histórica mensal de janeiro até o último mês disponível.
+   - Linha de Venda por mês.
+   - Linha de % de Quebra quando houver quebra no período.
+   - Cards mensais abaixo do gráfico para comparação rápida.
+4. Loja com quebra igual a zero no período não recebe mais classificação "Dentro da meta".
+   - Exibe "Venda apenas".
+   - O valor 0,00% de quebra e a faixa 0% a 10% deixam de aparecer para essas lojas.
+5. Ao entrar em uma loja sem quebra no mês, a visão semanal mostra somente Venda e Semanas, sem indicadores de quebra.
+6. O ranking também separa visualmente lojas com "Venda apenas" e não usa essas lojas no ranking de menor/maior quebra.
+7. Reimportações futuras por loja passam a registrar se existe coluna de quebra, preservando melhor a leitura do dado.
 
-FECHAMENTO DE AGOSTO ATÉ A 3ª SEMANA
-- Venda total: R$ 3.927.931,57
-- Quebra real: R$ 548.896,62
-- % quebra: 13,97%
+O QUE JÁ VAI ALIMENTADO
+- COSTA: janeiro até 3ª semana de agosto/2026
+- VIVENDAS: janeiro até 3ª semana de agosto/2026
+- COMPER/FORT: janeiro até 3ª semana de agosto/2026
+- DIA A DIA: janeiro até 3ª semana de agosto/2026
+- VARIADOS: janeiro até 3ª semana de agosto/2026
+- ASSAÍ: detalhamento semanal disponível na fonte de junho até 3ª semana de agosto/2026
 
-REDES EM AGOSTO
-- ATACADÃO DIA A DIA: R$ 1.623.875,35 | Quebra R$ 223.417,37
-- COMPER/FORT: R$ 455.481,00 | Quebra R$ 56.685,30
-- VIVENDAS: R$ 104.270,10 | Quebra R$ 18.632,40
-- BRETAS: R$ 125.141,15 | Quebra R$ 1.873,85
-- COSTA: R$ 1.120.832,00 | Quebra R$ 206.411,46
-- ASSAÍ: R$ 233.702,20 | Quebra R$ 32.898,80
-- VARIADOS: R$ 50.147,80 | Venda apenas
-- CONSIGNADOS: R$ 57.353,97 | Quebra R$ 8.977,44
-- NOSSA KAZA: R$ 157.128,00 | Venda apenas
+ORIGEM
+O histórico foi montado exclusivamente a partir das tabelas de reunião fornecidas:
+- COSTA REUNIÃO.xlsx
+- VIVENDAS REUNIÃO(1).xlsx
+- REUNIÃO DOS CONSIGNADOS - VARIADOS.xlsx
+- TABELA G.P REUNIÃO.xlsx
+- TABELA DIA A DIA REUNIAO.xlsx
+- VENDA ASSAÍ(1).xlsx
 
-COMPORTAMENTO DO RESUMO MENSAL
-- Empresa → Rede → Loja → Semanas.
-- A curva histórica geral usa os dados detalhados por loja como prioridade e completa somente redes sem detalhe com a base por rede.
-- Redes/lojas sem quebra exibem apenas Venda; não aparecem como 0% ou “Dentro da meta”.
-- Quando a fonte antiga só possui fechamento mensal, a loja mostra o valor mensal e informa claramente que não existe divisão semanal naquele período.
-- A quantidade de semanas não conta um fechamento mensal como se fosse uma semana.
+REGRAS IMPORTANTES
+- O histórico entra automaticamente uma única vez e é salvo no Firebase/localStorage.
+- Novas importações pelo ADM continuam prevalecendo normalmente.
+- Falta, Qualidade e Estoque aparecem como “—” no histórico quando essas informações não existem nas planilhas de reunião.
+- ASSAÍ: janeiro a maio têm valores mensais no arquivo original, mas não há detalhamento semanal nessa fonte; esses períodos não foram inventados.
+- O Resumo Mensal continua em: REDE → LOJAS → SEMANAS, agora com contexto aplicado ao restante do painel.
 
-FONTES AUDITADAS
-- COSTA REUNIÃO(1).xlsx
-- VIVENDAS REUNIÃO(2).xlsx
-- TABELA G.P REUNIÃO(1).xlsx
-- TABELA DIA A DIA REUNIAO(1).xlsx
-- VENDA ASSAÍ(2).xlsx
-- REUNIÃO DOS CONSIGNADOS - VARIADOS(1).xlsx
-- VARIADOS .xlsx
-- TABELA SEMANAL DASHBOARD COMERCIAL AGOSTO 1º SEM.xlsx
-- TABELA SEMANAL DASHBOARD COMERCIAL 2º SEMANA - AGOSTO.xlsx
-- TABELA SEMANAL DASHBOARD COMERCIAL 3º SEM. DE AGOSTO.xlsx
-
-OBSERVAÇÃO DE COBERTURA
-- Não foi encontrado histórico de BRETAS anterior a agosto nas planilhas fornecidas. Nenhum dado foi inventado para esses meses.
-
-IMPORTANTE
-- A versão da carga histórica foi alterada. Na primeira abertura desta V7, o sistema reaplica o histórico corrigido no Firebase/localStorage e remove a carga histórica antiga, preservando importações manuais posteriores que não pertençam à carga histórica.
-- Após subir os arquivos, faça Ctrl + F5 na primeira abertura.
-
-
-V8 — METAS MENSAIS
-- Nova aba ADM > Metas Mensais.
-- Meta total da empresa passa a ser cadastrada por mês/ano.
-- Se o mês não tiver meta cadastrada, o painel exibe “Meta não cadastrada” em vez de usar R$ 1.000.000,00.
-- Metas por Rede permanecem em aba própria para os drill-downs de rede/loja.
-- Em filtro semanal, a meta mensal geral é rateada pela quantidade de semanas importadas no mês.
-
-
-CORREÇÃO V9 — INICIALIZAÇÃO
-- O painel carrega a base local/histórica ANTES de consultar o Firebase.
-- Firebase agora sincroniza em segundo plano e não bloqueia filtros, ADM ou botões.
-- Preserva Metas Mensais e histórico completo da V7/V8.
-- Após publicar, substitua todos os arquivos do ZIP e faça Ctrl+F5.
-
-
-VERSÃO V10 — CORREÇÃO DE DUPLICIDADE
-- Corrige o resumo geral de Agosto para R$ 3.927.931,57 de venda e 13,97% de quebra.
-- Remove a dupla contagem de NOSSA KAZA (R$ 157.128,00).
-- O detalhamento por loja passa a ter prioridade no consolidado quando disponível.
-- Importação por rede continua sendo usada como complemento quando uma rede ainda não possui detalhamento.
-- A carga histórica é reconciliada após sincronização com Firebase para impedir que snapshot antigo reintroduza duplicidades.
-- Metas mensais permanecem no ADM; quando não cadastradas, a venda e a quebra continuam aparecendo normalmente.
+ATUALIZAÇÃO V4 — CURVA HISTÓRICA POR LOJA
+- Ao clicar em uma loja no Resumo Mensal, a tela agora mostra também a evolução mensal histórica da própria loja.
+- A curva usa Venda e % de Quebra quando a loja possui quebra no histórico.
+- Para lojas sem quebra, o gráfico exibe somente a curva de Venda e os meses ficam marcados como "Venda apenas".
+- O detalhamento semanal da loja continua abaixo da curva mensal.
