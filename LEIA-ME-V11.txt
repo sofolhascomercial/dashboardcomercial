@@ -1,0 +1,18 @@
+DASHBOARD COMERCIAL SÓ FOLHAS — V11
+
+CORREÇÃO PRINCIPAL
+- Remove registros antigos do Firebase que duplicavam meses/redes já cobertos pela carga histórica oficial.
+- Corrige especificamente a dupla contagem de CONSIGNADOS em Agosto/2026.
+- Mantém importações por loja feitas após a geração da carga histórica; uma nova importação semanal substitui a semana correspondente.
+- Linhas TOTAL / TOTAL DA REDE nunca entram na base por loja.
+- Mantém ADM > Metas Mensais.
+
+CONFERÊNCIA AGOSTO/2026 (1ª a 3ª semana)
+Venda: R$ 3.927.931,57
+Quebra real: R$ 548.896,62
+Percentual: 13,97%
+
+INSTALAÇÃO
+1. Substitua TODOS os arquivos do site pelos arquivos deste ZIP.
+2. Faça Ctrl + F5 na primeira abertura.
+3. O histórico embarcado é aplicado antes da sincronização remota e limpa duplicidades antigas automaticamente.

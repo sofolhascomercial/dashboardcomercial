@@ -486,14 +486,26 @@ function normalizeStoredRecord(record) {
   };
 }
 
+function isAggregateStoreRecord(record) {
+  if (!record) return false;
+  if (record.isNetworkTotalOnly === true) return true;
+  const storeKey = normalizeStoreKey(record.loja || '');
+  if (!storeKey) return false;
+  return storeKey === 'total'
+    || storeKey === 'total da rede'
+    || storeKey.startsWith('total da rede ')
+    || storeKey.startsWith('total ');
+}
+
 function normalizeStoredStoreRecord(record) {
   if (!record || typeof record !== 'object') return record;
   const base = normalizeStoredRecord(record);
+  const aggregateOnly = isAggregateStoreRecord({ ...record, loja: base.loja });
   return {
     ...base,
     valorRecebido: Number(record.valorRecebido || 0),
-    sourceType: 'store-detail',
-    isNetworkTotalOnly: false
+    sourceType: aggregateOnly ? 'network-total' : 'store-detail',
+    isNetworkTotalOnly: aggregateOnly
   };
 }
 
@@ -521,32 +533,67 @@ function historyRecordKey(record) {
   return [monthKey, week, network, store].join('|');
 }
 
+function historyMonthNetworkKey(record) {
+  if (!record) return '';
+  const monthKey = record.monthKey || inferRecordMonthKey(record);
+  const network = normalizeNetworkName(record.rede || '');
+  return [monthKey, network].join('|');
+}
+
+function historyGlobalPeriodKey(record) {
+  if (!record) return '';
+  const monthKey = record.monthKey || inferRecordMonthKey(record);
+  const week = String(record.semana || record.weekLabel || '').trim();
+  return [monthKey, week].join('|');
+}
+
+function removeAggregateRowsFromStoreData() {
+  if (!Array.isArray(appState.storeData) || !appState.storeData.length) return false;
+  const before = appState.storeData.length;
+  appState.storeData = appState.storeData.filter(item => !isAggregateStoreRecord(item));
+  return appState.storeData.length !== before;
+}
+
 function mergePreloadedHistory() {
   const seed = window.__SOFOLHAS_PRELOADED_HISTORY__;
   if (!seed || !Array.isArray(seed.records) || !seed.records.length) return false;
   const version = String(seed.version || HISTORY_SEED_VERSION);
+  const seedGeneratedAt = new Date(seed.generatedAt || 0).getTime() || 0;
 
   const seededRecords = seed.records.map(normalizeStoredStoreRecord);
-  const seededKeys = new Set(seededRecords.map(historyRecordKey).filter(Boolean));
+  const seededMonthNetworks = new Set(seededRecords.map(historyMonthNetworkKey).filter(Boolean));
 
-  // Sempre reconcilia a carga histórica embarcada. Isso impede que um snapshot
-  // remoto antigo do Firebase volte a inserir registros históricos duplicados.
-  // Importações manuais feitas pelo ADM continuam prevalecendo sobre a carga
-  // embarcada quando possuem a mesma chave mês + semana + rede + loja.
-  const manualOverrideKeys = new Set(
-    appState.storeData
-      .filter(item => item && !item.historySource && !item.isPreloadedHistory)
-      .map(historyRecordKey)
-      .filter(key => key && seededKeys.has(key))
+  // Uma importação por loja feita DEPOIS da geração da carga embarcada é uma
+  // fotografia mais nova da semana e deve substituir a semana correspondente.
+  const newerManualPeriods = new Set(
+    appState.storeImports
+      .filter(batch => batch && !batch.isPreloadedHistory && !batch.historySource)
+      .filter(batch => (new Date(batch.importedAt || 0).getTime() || 0) > seedGeneratedAt)
+      .map(batch => historyGlobalPeriodKey({
+        monthKey: batch.monthKey || inferRecordMonthKey(batch),
+        semana: batch.weekLabel || ''
+      }))
+      .filter(Boolean)
   );
 
+  // A carga embarcada é a referência oficial do histórico até o momento em
+  // que foi gerada. Registros antigos do Firebase para o mesmo mês/rede são
+  // removidos para impedir duplicidade (ex.: CONSIGNADOS somado duas vezes).
+  // Importações posteriores à carga continuam preservadas normalmente.
   appState.storeData = appState.storeData.filter(item => {
-    const key = historyRecordKey(item);
-    if (item?.historySource || item?.isPreloadedHistory) return !seededKeys.has(key);
+    if (!item) return false;
+    const importedAt = new Date(item.dataImportacao || item.importedAt || 0).getTime() || 0;
+    const monthNetworkKey = historyMonthNetworkKey(item);
+    const globalPeriodKey = historyGlobalPeriodKey(item);
+
+    if (item.historySource || item.isPreloadedHistory) return false;
+    if (newerManualPeriods.has(globalPeriodKey)) return true;
+    if (seededMonthNetworks.has(monthNetworkKey) && importedAt <= seedGeneratedAt) return false;
     return true;
   });
 
-  appState.storeData.push(...seededRecords.filter(item => !manualOverrideKeys.has(historyRecordKey(item))));
+  appState.storeData.push(...seededRecords.filter(item => !newerManualPeriods.has(historyGlobalPeriodKey(item))));
+  removeAggregateRowsFromStoreData();
 
   const seedBatches = (seed.batches || []).map(normalizeStoredImport);
   const seedBatchIds = new Set(seedBatches.map(item => item.id));
@@ -556,11 +603,10 @@ function mergePreloadedHistory() {
   ].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
 
   appState.config.historySeedVersion = version;
-  if (!appState.config.historySeededAt) appState.config.historySeededAt = new Date().toISOString();
+  appState.config.historySeededAt = seed.generatedAt || appState.config.historySeededAt || new Date().toISOString();
   if (!appState.config.ultimaImportacao) appState.config.ultimaImportacao = seed.generatedAt || new Date().toISOString();
   return true;
 }
-
 
 
 function init() {
@@ -2546,16 +2592,15 @@ function getMonthlySummaryMonthKey() {
 function getMonthlyNetworkBase(monthKey) {
   // Quando existe detalhamento por loja para uma rede/mês, ele é a fonte
   // principal do consolidado. A importação por rede entra apenas para redes
-  // que ainda não possuem detalhamento. Isso evita dupla contagem (ex.:
-  // NOSSA KAZA já separada do antigo bloco VARIADOS).
-  const detailed = appState.storeData.filter(item =>
-    (item.monthKey || inferRecordMonthKey(item)) === monthKey
-  );
-  const detailedNetworks = new Set(detailed.map(item => item.rede));
+  // que ainda não possuem detalhamento. Linhas agregadas (TOTAL DA REDE)
+  // nunca entram na base por loja.
+  const detailed = getMonthlyStoreBase(monthKey);
+  const detailedNetworks = new Set(detailed.map(item => normalizeNetworkName(item.rede)));
 
   const networkOnlyFallback = appState.data.filter(item => {
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
-    return sameMonth && !detailedNetworks.has(item.rede);
+    const normalizedNetwork = normalizeNetworkName(item.rede);
+    return sameMonth && !detailedNetworks.has(normalizedNetwork);
   });
 
   return [...detailed, ...networkOnlyFallback];
@@ -2563,6 +2608,7 @@ function getMonthlyNetworkBase(monthKey) {
 
 function getMonthlyStoreBase(monthKey, network = '') {
   return appState.storeData.filter(item => {
+    if (isAggregateStoreRecord(item)) return false;
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
     const sameNetwork = !network || item.rede === network;
     return sameMonth && sameNetwork;
@@ -2752,13 +2798,11 @@ function getStoreMonthlyHistory(network, store) {
 // evita que uma importação antiga/parcial salva no Firebase substitua o
 // histórico completo de uma rede e derrube artificialmente o total do mês.
 function getCompanyHistoryBase(monthKey) {
-  const detailed = appState.storeData.filter(item =>
-    item && (item.monthKey || inferRecordMonthKey(item)) === monthKey
-  );
-  const detailedNetworks = new Set(detailed.map(item => item.rede));
+  const detailed = getMonthlyStoreBase(monthKey);
+  const detailedNetworks = new Set(detailed.map(item => normalizeNetworkName(item.rede)));
   const networkOnly = appState.data.filter(item => {
     if (!item || (item.monthKey || inferRecordMonthKey(item)) !== monthKey) return false;
-    return !detailedNetworks.has(item.rede);
+    return !detailedNetworks.has(normalizeNetworkName(item.rede));
   });
   return [...detailed, ...networkOnly];
 }
