@@ -1,4 +1,4 @@
-DASHBOARD COMERCIAL SÓ FOLHAS — HISTÓRICO JAN/2026 A AGO/2026 (3ª SEMANA) — V2 DRILL-DOWN
+DASHBOARD COMERCIAL SÓ FOLHAS — HISTÓRICO JAN/2026 A AGO/2026 (3ª SEMANA) — V5 — CURVA HISTÓRICA NO RESUMO GERAL
 
 ARQUIVOS PARA SUBIR:
 - index.html
@@ -53,3 +53,12 @@ ATUALIZAÇÃO V4 — CURVA HISTÓRICA POR LOJA
 - A curva usa Venda e % de Quebra quando a loja possui quebra no histórico.
 - Para lojas sem quebra, o gráfico exibe somente a curva de Venda e os meses ficam marcados como "Venda apenas".
 - O detalhamento semanal da loja continua abaixo da curva mensal.
+
+
+ALTERAÇÃO V5
+8. O Resumo Mensal inicial agora também mostra o Comparativo Histórico do RESUMO GERAL DA EMPRESA.
+   - Curva mensal de Venda consolidada.
+   - Curva mensal de % de Quebra consolidada.
+   - Cards de janeiro até o último mês disponível.
+   - O mês selecionado fica destacado.
+   - Ao entrar em uma rede ou loja, a curva continua sendo filtrada para o contexto clicado.
