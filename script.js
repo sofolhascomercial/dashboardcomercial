@@ -2535,6 +2535,28 @@ function getNetworkMonthlyHistory(network) {
   });
 }
 
+function getStoreMonthlyHistory(network, store) {
+  const monthKeys = [...new Set(appState.storeData
+    .filter(item => item && item.rede === network && item.loja === store)
+    .map(item => item.monthKey || inferRecordMonthKey(item))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+
+  return monthKeys.map(monthKey => {
+    const records = getMonthlyStoreBase(monthKey, network).filter(item => item.loja === store);
+    const totals = aggregateRecords(records);
+    const hasBreak = hasBreakTrackingForRecords(records);
+    return {
+      monthKey,
+      monthLabel: formatMonthFilterLabel(monthKey),
+      venda: Number(totals.venda.toFixed(2)),
+      quebra: Number(totals.quebra.toFixed(2)),
+      percentualQuebra: hasBreak && totals.venda > 0 ? Number(((totals.quebra / totals.venda) * 100).toFixed(2)) : null,
+      hasBreak
+    };
+  });
+}
+
 function syncContextFiltersFromMonthly(network = '', store = '') {
   appState.filters.rede = network || 'Todas';
   appState.filters.loja = store || 'Todas';
@@ -2825,6 +2847,8 @@ function renderMonthlyStoreWeeks(monthKey, network, store) {
   const percent = hasBreak && totals.venda > 0 ? (totals.quebra / totals.venda) * 100 : 0;
   const status = hasBreak ? monthlyStatusInfo(percent, totals.venda) : { label: 'Venda apenas', className: 'status--neutral' };
   const showStock = network === 'COSTA';
+  const history = getStoreMonthlyHistory(network, store);
+  const historyHasBreak = history.some(item => item.hasBreak);
 
   els.monthlySummaryBody.innerHTML = `
     <div class="monthly-store-title">
@@ -2837,6 +2861,25 @@ function renderMonthlyStoreWeeks(monthKey, network, store) {
       <div class="monthly-kpi"><span>% Quebra</span><strong>${formatPercent(percent)}</strong></div>` : ''}
       <div class="monthly-kpi"><span>Semanas importadas</span><strong>${weeks.length}</strong></div>
     </div>
+
+    <article class="monthly-history-panel monthly-history-panel--store">
+      <div class="monthly-history-head">
+        <div>
+          <p class="eyebrow">Comparativo histórico da loja</p>
+          <strong>Evolução mensal • ${escapeHtml(store)}</strong>
+        </div>
+        <span>${history.length ? `${history[0].monthLabel} → ${history[history.length - 1].monthLabel}` : 'Sem histórico'}</span>
+      </div>
+      <div class="monthly-history-chart-wrap"><canvas id="monthlyNetworkHistoryChart"></canvas></div>
+      <div class="monthly-history-months">
+        ${history.map(item => `<div class="monthly-history-month ${item.monthKey === monthKey ? 'is-current' : ''}">
+          <span>${escapeHtml(item.monthLabel)}</span>
+          <strong>${formatCurrency(item.venda)}</strong>
+          ${item.hasBreak && item.percentualQuebra !== null ? `<small>${formatPercent(item.percentualQuebra)} quebra</small>` : '<small>Venda apenas</small>'}
+        </div>`).join('')}
+      </div>
+    </article>
+
     <div class="monthly-store-detail-grid">
       <article class="monthly-chart-panel">
         <div class="monthly-chart-head">
@@ -2860,6 +2903,7 @@ function renderMonthlyStoreWeeks(monthKey, network, store) {
         </table>
       </div>
     </div>`;
+  renderMonthlyNetworkHistoryChart(history, historyHasBreak);
   renderMonthlyStoreTrendChart(weeks, hasBreak);
 }
 

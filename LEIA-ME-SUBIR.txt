@@ -47,3 +47,9 @@ REGRAS IMPORTANTES
 - Falta, Qualidade e Estoque aparecem como “—” no histórico quando essas informações não existem nas planilhas de reunião.
 - ASSAÍ: janeiro a maio têm valores mensais no arquivo original, mas não há detalhamento semanal nessa fonte; esses períodos não foram inventados.
 - O Resumo Mensal continua em: REDE → LOJAS → SEMANAS, agora com contexto aplicado ao restante do painel.
+
+ATUALIZAÇÃO V4 — CURVA HISTÓRICA POR LOJA
+- Ao clicar em uma loja no Resumo Mensal, a tela agora mostra também a evolução mensal histórica da própria loja.
+- A curva usa Venda e % de Quebra quando a loja possui quebra no histórico.
+- Para lojas sem quebra, o gráfico exibe somente a curva de Venda e os meses ficam marcados como "Venda apenas".
+- O detalhamento semanal da loja continua abaixo da curva mensal.
