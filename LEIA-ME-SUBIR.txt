@@ -1,6 +1,8 @@
-DASHBOARD COMERCIAL SÓ FOLHAS — HISTÓRICO JAN/2026 A AGO/2026 (3ª SEMANA) — V2 DRILL-DOWN
+DASHBOARD COMERCIAL SÓ FOLHAS — V4 OFICIAL ATUALIZADA
+Base canônica: dashboard-comercial-historico-loja-curva-v4(1).zip
+Atualização: 31/08/2026
 
-ARQUIVOS PARA SUBIR:
+ARQUIVOS PARA SUBIR
 - index.html
 - script.js
 - style.css
@@ -8,48 +10,70 @@ ARQUIVOS PARA SUBIR:
 - historico-2026.js
 - manter a pasta assets já existente no servidor
 
-ALTERAÇÕES DESTA VERSÃO
-1. Clique em REDE no Resumo Mensal passa a aplicar a rede como contexto do dashboard inteiro.
-   - Rankings, cards, gráficos, alertas e detalhamentos passam a mostrar somente a rede clicada.
-2. Clique em LOJA passa a aplicar a loja como contexto do dashboard inteiro.
-   - Os demais dados de outras lojas/redes deixam de aparecer enquanto a loja estiver selecionada.
-3. Ao abrir uma REDE, aparece uma curva histórica mensal de janeiro até o último mês disponível.
-   - Linha de Venda por mês.
-   - Linha de % de Quebra quando houver quebra no período.
-   - Cards mensais abaixo do gráfico para comparação rápida.
-4. Loja com quebra igual a zero no período não recebe mais classificação "Dentro da meta".
-   - Exibe "Venda apenas".
-   - O valor 0,00% de quebra e a faixa 0% a 10% deixam de aparecer para essas lojas.
-5. Ao entrar em uma loja sem quebra no mês, a visão semanal mostra somente Venda e Semanas, sem indicadores de quebra.
-6. O ranking também separa visualmente lojas com "Venda apenas" e não usa essas lojas no ranking de menor/maior quebra.
-7. Reimportações futuras por loja passam a registrar se existe coluna de quebra, preservando melhor a leitura do dado.
+O QUE FOI PRESERVADO
+- Layout e identidade visual da V4 oficial.
+- Todos os botões e funções existentes.
+- Filtros, ADM, importação por rede e por loja, rankings, alertas e gráficos.
+- Resumo Mensal em REDE → LOJAS → SEMANAS.
+- Curva histórica ao entrar em uma rede.
+- Curva histórica ao entrar em uma loja.
+- Loja/rede sem quebra exibida como “Venda apenas”.
 
-O QUE JÁ VAI ALIMENTADO
-- COSTA: janeiro até 3ª semana de agosto/2026
-- VIVENDAS: janeiro até 3ª semana de agosto/2026
-- COMPER/FORT: janeiro até 3ª semana de agosto/2026
-- DIA A DIA: janeiro até 3ª semana de agosto/2026
-- VARIADOS: janeiro até 3ª semana de agosto/2026
-- ASSAÍ: detalhamento semanal disponível na fonte de junho até 3ª semana de agosto/2026
+ATUALIZAÇÃO DE DADOS
+- Janeiro e fevereiro: preservados do histórico já existente na V4 oficial.
+- Março: 1ª a 4ª semanas enviadas.
+- Abril: 1ª a 4ª semanas + fechamento mensal enviado.
+- Maio: 1ª a 4ª semanas + fechamento mensal enviado.
+- Junho: 1ª a 4ª semanas + fechamento mensal enviado.
+- Julho: 1ª a 5ª semanas enviadas.
+- Agosto: 1ª a 3ª semanas enviadas.
 
-ORIGEM
-O histórico foi montado exclusivamente a partir das tabelas de reunião fornecidas:
-- COSTA REUNIÃO.xlsx
-- VIVENDAS REUNIÃO(1).xlsx
-- REUNIÃO DOS CONSIGNADOS - VARIADOS.xlsx
-- TABELA G.P REUNIÃO.xlsx
-- TABELA DIA A DIA REUNIAO.xlsx
-- VENDA ASSAÍ(1).xlsx
+REGRAS DE FONTE APLICADAS
+1. Abril, Maio e Junho:
+   - Resumo do mês e curvas mensais usam os arquivos “TOTAL DE ...”, pois são os fechamentos mensais fornecidos.
+   - O detalhamento semanal continua usando as planilhas semanais.
+2. Agosto — 1ª semana:
+   - Para DIA A DIA, COSTA, COMPER/FORT, VIVENDAS, ASSAÍ e CONSIGNADOS foi usada a “BASE DASH POR LOJAS 1º SEMANA AGOSTO”.
+   - BRETAS, VARIADOS e NOSSA KAZA foram complementados pela tabela semanal da 1ª semana.
+   - Essa regra mantém a COSTA da 1ª semana em R$ 461.267,00, conforme a base por lojas.
+3. NOSSA KAZA:
+   - Lojas “NOSSA KAZA ...” que aparecem dentro de REDE VARIADOS são classificadas como NOSSA KAZA.
+   - Não são somadas novamente pelo SÓ FOLHAS TOTAL.
+4. COSTA:
+   - A importação futura não subtrai mais estoque da coluna VENDA.
+   - Estoque continua como indicador separado.
+5. Planilha7 (Economart/Cerramix):
+   - É classificada como CONSIGNADOS para manter alinhamento com o dashboard semanal.
 
-REGRAS IMPORTANTES
-- O histórico entra automaticamente uma única vez e é salvo no Firebase/localStorage.
-- Novas importações pelo ADM continuam prevalecendo normalmente.
-- Falta, Qualidade e Estoque aparecem como “—” no histórico quando essas informações não existem nas planilhas de reunião.
-- ASSAÍ: janeiro a maio têm valores mensais no arquivo original, mas não há detalhamento semanal nessa fonte; esses períodos não foram inventados.
-- O Resumo Mensal continua em: REDE → LOJAS → SEMANAS, agora com contexto aplicado ao restante do painel.
+NOVA CURVA NO RESUMO GERAL
+- Na tela inicial do Resumo Mensal existe agora a mesma curva histórica que já aparecia em redes e lojas.
+- Mostra a evolução mensal da empresa inteira.
+- Linha de Venda e linha de % de Quebra.
+- Cards mensais abaixo do gráfico.
 
-ATUALIZAÇÃO V4 — CURVA HISTÓRICA POR LOJA
-- Ao clicar em uma loja no Resumo Mensal, a tela agora mostra também a evolução mensal histórica da própria loja.
-- A curva usa Venda e % de Quebra quando a loja possui quebra no histórico.
-- Para lojas sem quebra, o gráfico exibe somente a curva de Venda e os meses ficam marcados como "Venda apenas".
-- O detalhamento semanal da loja continua abaixo da curva mensal.
+FECHAMENTOS MENSAIS DA CURVA GERAL
+- Janeiro: R$ 3.388.083,36 | Quebra R$ 573.443,85 | 16,93%
+- Fevereiro: R$ 3.346.818,45 | Quebra R$ 493.546,20 | 14,75%
+- Março: R$ 3.881.921,59 | Quebra R$ 450.262,35 | 11,60%
+- Abril: R$ 4.938.225,71 | Quebra R$ 715.560,23 | 14,49%
+- Maio: R$ 5.111.260,94 | Quebra R$ 590.260,46 | 11,55%
+- Junho: R$ 4.965.723,72 | Quebra R$ 731.615,51 | 14,73%
+- Julho: R$ 5.523.667,24 | Quebra R$ 745.290,36 | 13,49%
+- Agosto (até 3ª semana): R$ 3.927.931,57 | Quebra R$ 548.896,62 | 13,97%
+
+MIGRAÇÃO
+- Ao abrir esta versão pela primeira vez, o histórico oficial acima substitui os registros antigos de janeiro a agosto no Firebase/localStorage.
+- Isso elimina duplicidades antigas e o ajuste antigo da venda COSTA.
+- Depois da migração, novas importações pelo ADM continuam funcionando normalmente.
+
+INSTALAÇÃO
+1. Substitua os arquivos do site pelos arquivos deste pacote.
+2. Mantenha a pasta assets.
+3. Faça Ctrl + F5 na primeira abertura.
+
+
+ATUALIZAÇÃO - FECHAMENTO MENSAL OFICIAL
+- VENDA SÓ FOLHAS TOTAL.xlsx passa a ser a fonte oficial do consolidado geral mensal.
+- A linha histórica geral e os cards gerais mensais usam o fechamento oficial de Jan-Ago/2026.
+- Rede, loja e semana continuam usando as bases operacionais, preservando o drill-down.
+- Nenhum botão, filtro ou layout foi removido.

@@ -17,7 +17,7 @@ const ADM_CREDENTIALS = {
 
 const STORAGE_KEY = 'sofolhas-dashboard-v7';
 const LEGACY_STORAGE_KEYS = ['sofolhas-dashboard-v6'];
-const HISTORY_SEED_VERSION = 'historico-semanal-2026-jan-ago3-v1';
+const HISTORY_SEED_VERSION = 'historico-dashboard-2026-jan-ago3-v4-oficial-v2';
 const BREAK_LIMIT = 12;
 const WARNING_LIMIT = 10;
 const CIRCLE_LENGTH = 326.73;
@@ -38,6 +38,21 @@ const MONTH_OPTIONS = [
   { value: '11', label: 'Novembro' },
   { value: '12', label: 'Dezembro' }
 ];
+
+// Fechamento mensal oficial da empresa.
+// Fonte: VENDA SÓ FOLHAS TOTAL.xlsx, aba NOVA, blocos "MÊS - TOTAL".
+// Esta fonte substitui apenas o consolidado geral mensal. O detalhamento por
+// rede/loja/semana continua vindo das bases operacionais importadas.
+const OFFICIAL_COMPANY_MONTHLY_CLOSINGS = Object.freeze({
+  '2026-01': { venda: 4229882.95, quebra: 667040.49, falta: 36090.85, qualidade: 57383.39, estoque: 64440.50 },
+  '2026-02': { venda: 4098404.10, quebra: 549506.11, falta: 24366.00, qualidade: 27090.10, estoque: 39331.70 },
+  '2026-03': { venda: 4046127.84, quebra: 466906.58, falta: 46141.40, qualidade: 31942.90, estoque: 40209.87 },
+  '2026-04': { venda: 4938225.71, quebra: 715560.23, falta: 59099.20, qualidade: 18693.50, estoque: 42233.40 },
+  '2026-05': { venda: 3986904.54, quebra: 424292.31, falta: 25135.40, qualidade: 14328.20, estoque: 0.00 },
+  '2026-06': { venda: 3901211.12, quebra: 549680.41, falta: 14347.60, qualidade: 15259.70, estoque: 0.00 },
+  '2026-07': { venda: 5139323.55, quebra: 589778.78, falta: 37524.50, qualidade: 25411.77, estoque: 55827.32 },
+  '2026-08': { venda: 3927931.57, quebra: 548896.62, falta: 63255.43, qualidade: 19777.76, estoque: 99593.74 }
+});
 const COMPER_FORT_STORE_MAPPINGS = [
   ['G.P - 77 VALPARAISO', 'FORT VALPARAÍSO'],
   ['G.P - 58 AGUAS CLARAS', 'COMPER ÁGUAS CLARAS'],
@@ -54,6 +69,7 @@ const COMPER_FORT_STORE_MAPPINGS = [
 const appState = {
   data: [],
   storeData: [],
+  monthlyData: [],
   config: {
     metaGeral: 1000000,
     metasPorRede: {},
@@ -133,6 +149,7 @@ function exportStateSnapshot() {
   return sanitizeForFirebase({
     data: appState.data,
     storeData: appState.storeData,
+    monthlyData: appState.monthlyData,
     config: {
       ...appState.config,
       metasPorRede: serializeMetaKeysForFirebase(appState.config.metasPorRede)
@@ -156,6 +173,7 @@ function applyPersistedState(saved) {
   if (saved) {
     appState.data = Array.isArray(saved.data) ? saved.data : [];
     appState.storeData = Array.isArray(saved.storeData) ? saved.storeData : [];
+    appState.monthlyData = Array.isArray(saved.monthlyData) ? saved.monthlyData : [];
     appState.imports = Array.isArray(saved.imports)
       ? saved.imports.sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0))
       : [];
@@ -170,6 +188,7 @@ function applyPersistedState(saved) {
   } else {
     appState.data = [];
     appState.storeData = [];
+    appState.monthlyData = [];
     appState.imports = [];
     appState.storeImports = [];
     appState.config = {
@@ -183,6 +202,7 @@ function applyPersistedState(saved) {
   if (looksLikeSampleData(appState.data, appState.imports)) {
     appState.data = [];
     appState.storeData = [];
+    appState.monthlyData = [];
     appState.imports = [];
     appState.storeImports = [];
     appState.config.ultimaAtualizacao = null;
@@ -191,6 +211,7 @@ function applyPersistedState(saved) {
 
   appState.data = appState.data.map(normalizeStoredRecord);
   appState.storeData = appState.storeData.map(normalizeStoredStoreRecord);
+  appState.monthlyData = appState.monthlyData.map(normalizeStoredStoreRecord);
   appState.imports = appState.imports.map(normalizeStoredImport);
   appState.storeImports = appState.storeImports.map(normalizeStoredImport);
   appState.config.metaGeral = calculateMetaGeralFromNetworks(appState.config.metasPorRede);
@@ -314,32 +335,17 @@ function getCostaPreviousWeekStockMap(monthKey, weekLabel, baseRecords = appStat
 function applyCostaWeeklySalesAdjustment(records, baseRecords = appState.data) {
   if (!Array.isArray(records) || !records.length) return records;
 
+  // A coluna VENDA das bases semanais já é o valor oficial do período.
+  // Estoque permanece como indicador separado e nunca deve reduzir a venda.
   return records.map(record => {
     if (!record || record.rede !== 'COSTA') return record;
-
-    const currentWeekOrder = weekSortValue(record.semana);
-    if (!Number.isFinite(currentWeekOrder) || currentWeekOrder <= 1) {
-      return {
-        ...record,
-        valorVenda: Number(Number(record.valorVenda || 0).toFixed(2)),
-        percentualQuebra: Number((Number(record.valorVenda || 0) > 0 ? ((Number(record.valorQuebra || 0) / Number(record.valorVenda || 0)) * 100) : 0).toFixed(2)),
-        percentualFalta: Number((Number(record.valorVenda || 0) > 0 ? ((Number(record.valorFalta || 0) / Number(record.valorVenda || 0)) * 100) : 0).toFixed(2)),
-        percentualQualidade: Number((Number(record.valorVenda || 0) > 0 ? ((Number(record.valorQualidade || 0) / Number(record.valorVenda || 0)) * 100) : 0).toFixed(2)),
-        statusQuebra: getBreakStatus(Number(record.valorVenda || 0) > 0 ? ((Number(record.valorQuebra || 0) / Number(record.valorVenda || 0)) * 100) : 0).label
-      };
-    }
-
-    const previousWeekStockMap = getCostaPreviousWeekStockMap(record.monthKey || inferRecordMonthKey(record), record.semana, baseRecords);
-    const previousWeekStock = Number(previousWeekStockMap.get(record.loja) || 0);
-    const adjustedVenda = Number((Number(record.valorVenda || 0) - previousWeekStock).toFixed(2));
-    const safeVenda = adjustedVenda > 0 ? adjustedVenda : Number(record.valorVenda || 0);
-    const percentualQuebra = safeVenda > 0 ? Number((((Number(record.valorQuebra || 0)) / safeVenda) * 100).toFixed(2)) : 0;
-    const percentualFalta = safeVenda > 0 ? Number((((Number(record.valorFalta || 0)) / safeVenda) * 100).toFixed(2)) : 0;
-    const percentualQualidade = safeVenda > 0 ? Number((((Number(record.valorQualidade || 0)) / safeVenda) * 100).toFixed(2)) : 0;
-
+    const venda = Number(Number(record.valorVenda || 0).toFixed(2));
+    const percentualQuebra = venda > 0 ? Number(((Number(record.valorQuebra || 0) / venda) * 100).toFixed(2)) : 0;
+    const percentualFalta = venda > 0 ? Number(((Number(record.valorFalta || 0) / venda) * 100).toFixed(2)) : 0;
+    const percentualQualidade = venda > 0 ? Number(((Number(record.valorQualidade || 0) / venda) * 100).toFixed(2)) : 0;
     return {
       ...record,
-      valorVenda: safeVenda,
+      valorVenda: venda,
       percentualQuebra,
       percentualFalta,
       percentualQualidade,
@@ -427,13 +433,18 @@ function normalizeStoreAndNetwork(store, network) {
   const originalStore = String(store || '').replace(/\s+/g, ' ').trim();
   let resolvedNetwork = normalizeNetworkName(network);
   const storeKey = normalizeStoreKey(originalStore);
+  const normalizedStoreText = normalizeText(originalStore);
   const mappedComperFort = COMPER_FORT_STORE_MAPPINGS.find(item => item.key === storeKey);
 
   if (mappedComperFort) {
     return { loja: mappedComperFort.to, rede: 'COMPER/FORT' };
   }
 
-  if (!resolvedNetwork) {
+  // NOSSA KAZA pode vir dentro da aba REDE VARIADOS. A loja define a rede
+  // e impede que a mesma venda seja somada novamente pelo SÓ FOLHAS TOTAL.
+  if (normalizedStoreText.includes('nossa kaza') || normalizedStoreText.includes('nossa casa')) {
+    resolvedNetwork = 'NOSSA KAZA';
+  } else if (!resolvedNetwork) {
     resolvedNetwork = inferNetworkByStore(originalStore) || '';
   }
 
@@ -519,29 +530,47 @@ function mergePreloadedHistory() {
   const version = String(seed.version || HISTORY_SEED_VERSION);
   if (appState.config.historySeedVersion === version) return false;
 
+  const coverageStart = String(seed.coverage?.start || '');
+  const coverageEnd = String(seed.coverage?.end || '');
+  const isInSeedCoverage = item => {
+    const key = item?.monthKey || inferRecordMonthKey(item || {});
+    if (!key || !coverageStart || !coverageEnd) return false;
+    return key >= coverageStart && key <= coverageEnd;
+  };
+
   const seededRecords = seed.records.map(normalizeStoredStoreRecord);
   const seededKeys = new Set(seededRecords.map(historyRecordKey).filter(Boolean));
 
-  // Na primeira migração, a base histórica fornecida substitui registros do
-  // mesmo mês + semana + rede + loja. Depois disso, novas importações do ADM
-  // prevalecem, porque a versão da migração fica salva no Firebase/localStorage.
+  // Esta versão é uma atualização completa do histórico enviado pelo usuário.
+  // Na migração, remove importações antigas do mesmo período para não misturar
+  // bases, não duplicar NOSSA KAZA e não reaplicar ajustes antigos da COSTA.
+  appState.data = appState.data.filter(item => !isInSeedCoverage(item));
+  appState.imports = appState.imports.filter(item => !isInSeedCoverage(item));
+
   appState.storeData = appState.storeData.filter(item => {
     if (item?.historySource) return false;
+    if (isInSeedCoverage(item)) return false;
     return !seededKeys.has(historyRecordKey(item));
   });
   appState.storeData.push(...seededRecords);
+
+  const seededMonthlyRecords = Array.isArray(seed.monthlyRecords)
+    ? seed.monthlyRecords.map(normalizeStoredStoreRecord)
+    : [];
+  appState.monthlyData = appState.monthlyData.filter(item => !isInSeedCoverage(item));
+  appState.monthlyData.push(...seededMonthlyRecords);
 
   const seedBatches = (seed.batches || []).map(normalizeStoredImport);
   const seedBatchIds = new Set(seedBatches.map(item => item.id));
   appState.storeImports = [
     ...seedBatches,
-    ...appState.storeImports.filter(item => !item?.isPreloadedHistory && !seedBatchIds.has(item.id))
+    ...appState.storeImports.filter(item => !item?.isPreloadedHistory && !isInSeedCoverage(item) && !seedBatchIds.has(item.id))
   ].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
 
   appState.config.historySeedVersion = version;
   appState.config.historySeededAt = new Date().toISOString();
   appState.config.ultimaAtualizacao = new Date().toISOString();
-  if (!appState.config.ultimaImportacao) appState.config.ultimaImportacao = seed.generatedAt || new Date().toISOString();
+  appState.config.ultimaImportacao = seed.generatedAt || new Date().toISOString();
   return true;
 }
 
@@ -844,7 +873,7 @@ function createCustomSelect(id, options, selectedValue) {
 }
 
 function syncLojaOptions() {
-  let dataForStores = [...appState.data.filter(item => !item.isNetworkTotalOnly), ...appState.storeData];
+  let dataForStores = [...appState.data.filter(item => !item.isNetworkTotalOnly), ...appState.storeData, ...appState.monthlyData];
   if (appState.filters.rede !== 'Todas') dataForStores = dataForStores.filter(item => item.rede === appState.filters.rede);
   if (appState.filters.mes !== 'Todas') dataForStores = dataForStores.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
   const stores = [...new Set(dataForStores.map(item => item.loja))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -861,7 +890,7 @@ function formatMonthFilterLabel(monthKey) {
 }
 
 function syncMesOptions() {
-  const monthKeys = [...new Set([...appState.data, ...appState.storeData].map(item => item.monthKey || inferRecordMonthKey(item)).filter(Boolean))]
+  const monthKeys = [...new Set([...appState.data, ...appState.storeData, ...appState.monthlyData].map(item => item.monthKey || inferRecordMonthKey(item)).filter(Boolean))]
     .sort((a, b) => String(b).localeCompare(String(a), 'pt-BR', { numeric: true }));
   const selected = monthKeys.includes(appState.filters.mes) ? appState.filters.mes : 'Todas';
   appState.filters.mes = selected;
@@ -1240,9 +1269,10 @@ function inferStoreDetailNetwork(sheetName, rows = []) {
   if (normalized.includes('variad')) return 'VARIADOS';
   if (normalized.includes('nossa kaza') || normalized.includes('nossa casa')) return 'NOSSA KAZA';
 
-  // O modelo atual usa "Planilha7" para Economart/Cerramix, que pertencem ao bloco VARIADOS.
+  // O modelo de loja usa "Planilha7" para Economart/Cerramix. No dashboard semanal
+  // essas unidades pertencem à rede CONSIGNADOS.
   const labels = (rows || []).slice(0, 8).map(row => normalizeText(getRowLabel(row))).join(' | ');
-  if (labels.includes('economart') || labels.includes('cerramix')) return 'VARIADOS';
+  if (labels.includes('economart') || labels.includes('cerramix')) return 'CONSIGNADOS';
   return '';
 }
 
@@ -1641,11 +1671,24 @@ function compareWorkbookTotals(grouped, totalSheet) {
   if (!totalSheet.length) return [];
   return totalSheet.map(summary => {
     const network = normalizeNetworkName(summary.rede);
-    const found = grouped.find(item => normalizeNetworkName(item.rede) === network);
+    let found = grouped.find(item => normalizeNetworkName(item.rede) === network);
+    if (network === 'VARIADOS' && totalSheet.some(item => normalizeNetworkName(item.rede) === 'NOSSA KAZA')) {
+      const nossaKaza = grouped.find(item => normalizeNetworkName(item.rede) === 'NOSSA KAZA');
+      if (found && nossaKaza) {
+        found = {
+          ...found,
+          venda: Number(found.venda || 0) + Number(nossaKaza.venda || 0),
+          quebra: Number(found.quebra || 0) + Number(nossaKaza.quebra || 0),
+          falta: Number(found.falta || 0) + Number(nossaKaza.falta || 0),
+          qualidade: Number(found.qualidade || 0) + Number(nossaKaza.qualidade || 0),
+          estoque: Number(found.estoque || 0) + Number(nossaKaza.estoque || 0)
+        };
+      }
+    }
     if (!found) return null;
     const details = [];
-    // A venda COSTA é ajustada por estoque anterior; a venda bruta já é conferida na própria aba COSTA.
-    if (network !== 'COSTA') details.push(buildVerificationDetail('Venda', Number(summary.venda || 0), Number(found.venda || 0), { alwaysInclude: true }));
+    // A coluna VENDA é oficial em todas as redes, inclusive COSTA.
+    details.push(buildVerificationDetail('Venda', Number(summary.venda || 0), Number(found.venda || 0), { alwaysInclude: true }));
     if (network === 'ATACADÃO DIA A DIA' || network === 'COMPER/FORT' || network === 'COSTA') {
       details.push(buildVerificationDetail('Falta', Number(summary.falta || 0), Number(found.falta || 0)));
       details.push(buildVerificationDetail('Qualidade', Number(summary.qualidade || 0), Number(found.qualidade || 0)));
@@ -1692,7 +1735,10 @@ function getFilteredData() {
     : getLatestImportMonthKey();
 
   let source = [];
-  if (requestedMonth && appState.filters.loja !== 'Todas') {
+  const weeklyView = appState.filters.semana !== 'Todas';
+  if (requestedMonth && !weeklyView) {
+    source = getMonthlyAnalysisBase(requestedMonth);
+  } else if (requestedMonth && appState.filters.loja !== 'Todas') {
     source = getMonthlyStoreBase(
       requestedMonth,
       appState.filters.rede !== 'Todas' ? appState.filters.rede : ''
@@ -2008,10 +2054,27 @@ function renderDetailsNetworkTabs(filtered) {
 
 function renderTopInfo(filtered) {
   const displayRecords = getDisplayRecords(filtered);
-  const totals = aggregateRecords(displayRecords);
+  const calculatedTotals = aggregateRecords(displayRecords);
+  const activeMonthKey = getActiveCompanyMonthKey(displayRecords);
+  const officialClosing = shouldUseOfficialCompanyMonthlyClosing(displayRecords)
+    ? getOfficialCompanyMonthlyClosing(activeMonthKey)
+    : null;
+  const totals = officialClosing
+    ? {
+        ...calculatedTotals,
+        venda: officialClosing.venda,
+        quebra: officialClosing.quebra,
+        falta: officialClosing.falta,
+        qualidade: officialClosing.qualidade,
+        estoque: officialClosing.estoque,
+        hasFaltaData: true,
+        hasQualidadeData: true,
+        hasEstoqueData: true
+      }
+    : calculatedTotals;
   const metaTarget = resolveActiveMetaTarget(displayRecords);
   const metaPercent = metaTarget > 0 ? (totals.venda / metaTarget) * 100 : 0;
-  const hasBreak = hasBreakTrackingForRecords(displayRecords);
+  const hasBreak = officialClosing ? true : hasBreakTrackingForRecords(displayRecords);
   const quebraReal = hasBreak ? Math.max(0, totals.quebra) : 0;
   const percQuebraReal = hasBreak && totals.venda > 0 ? (quebraReal / totals.venda) * 100 : 0;
   const status = hasBreak ? getBreakStatus(percQuebraReal) : { label: 'Venda apenas', className: 'status--neutral' };
@@ -2382,6 +2445,16 @@ function getMonthlyNetworkBase(monthKey) {
   return [...official, ...fallback];
 }
 
+function getMonthlyAnalysisBase(monthKey, network = '') {
+  const monthly = appState.monthlyData.filter(item => {
+    const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
+    const sameNetwork = !network || item.rede === network;
+    return sameMonth && sameNetwork;
+  });
+  if (monthly.length) return monthly;
+  return getMonthlyNetworkBase(monthKey).filter(item => !network || item.rede === network);
+}
+
 function getMonthlyStoreBase(monthKey, network = '') {
   return appState.storeData.filter(item => {
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
@@ -2482,7 +2555,7 @@ function hasBreakTrackingForStore(network, store, monthKey = '', weekLabel = '')
   const resolvedWeek = weekLabel
     || (appState.filters.semana !== 'Todas' ? appState.filters.semana : '');
 
-  const records = [...appState.storeData, ...appState.data].filter(item => {
+  const records = [...appState.storeData, ...appState.data, ...appState.monthlyData].filter(item => {
     if (!item || item.isNetworkTotalOnly || item.rede !== network || item.loja !== store) return false;
     const itemMonth = item.monthKey || inferRecordMonthKey(item);
     if (resolvedMonth && itemMonth !== resolvedMonth) return false;
@@ -2510,18 +2583,76 @@ function getBreakDisplayForStore(network, store, percent = 0, sale = 0) {
   };
 }
 
+function getOfficialCompanyMonthlyClosing(monthKey) {
+  const closing = OFFICIAL_COMPANY_MONTHLY_CLOSINGS[monthKey];
+  if (!closing) return null;
+  return {
+    ...closing,
+    percentualQuebra: closing.venda > 0 ? Number(((closing.quebra / closing.venda) * 100).toFixed(2)) : 0
+  };
+}
+
+function getActiveCompanyMonthKey(records = []) {
+  if (appState.filters.mes !== 'Todas') return appState.filters.mes;
+  const recordMonth = records
+    .map(item => item?.monthKey || inferRecordMonthKey(item || {}))
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a, 'pt-BR', { numeric: true }))[0];
+  return recordMonth || getMonthlySummaryMonthKey() || getLatestImportMonthKey();
+}
+
+function shouldUseOfficialCompanyMonthlyClosing(records = []) {
+  if (appState.filters.rede !== 'Todas' || appState.filters.loja !== 'Todas' || appState.filters.semana !== 'Todas') return false;
+  const monthKey = getActiveCompanyMonthKey(records);
+  return Boolean(monthKey && getOfficialCompanyMonthlyClosing(monthKey));
+}
+
+function getCompanyMonthlyHistory() {
+  const monthKeys = [...new Set([
+    ...Object.keys(OFFICIAL_COMPANY_MONTHLY_CLOSINGS),
+    ...[...appState.storeData, ...appState.data, ...appState.monthlyData]
+      .map(item => item?.monthKey || inferRecordMonthKey(item || {}))
+      .filter(Boolean)
+  ])].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+
+  return monthKeys.map(monthKey => {
+    const official = getOfficialCompanyMonthlyClosing(monthKey);
+    if (official) {
+      return {
+        monthKey,
+        monthLabel: formatMonthFilterLabel(monthKey),
+        venda: official.venda,
+        quebra: official.quebra,
+        percentualQuebra: official.percentualQuebra,
+        hasBreak: true,
+        isOfficialClosing: true
+      };
+    }
+
+    const records = getMonthlyAnalysisBase(monthKey);
+    const totals = aggregateRecords(records);
+    const hasBreak = hasBreakTrackingForRecords(records);
+    return {
+      monthKey,
+      monthLabel: formatMonthFilterLabel(monthKey),
+      venda: Number(totals.venda.toFixed(2)),
+      quebra: Number(totals.quebra.toFixed(2)),
+      percentualQuebra: hasBreak && totals.venda > 0 ? Number(((totals.quebra / totals.venda) * 100).toFixed(2)) : null,
+      hasBreak,
+      isOfficialClosing: false
+    };
+  });
+}
+
 function getNetworkMonthlyHistory(network) {
-  const monthKeys = [...new Set([...appState.storeData, ...appState.data]
+  const monthKeys = [...new Set([...appState.storeData, ...appState.data, ...appState.monthlyData]
     .filter(item => item && item.rede === network)
     .map(item => item.monthKey || inferRecordMonthKey(item))
     .filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
 
   return monthKeys.map(monthKey => {
-    const storeRecords = getMonthlyStoreBase(monthKey, network);
-    const records = storeRecords.length
-      ? storeRecords
-      : getMonthlyNetworkBase(monthKey).filter(item => item.rede === network);
+    const records = getMonthlyAnalysisBase(monthKey, network);
     const totals = aggregateRecords(records);
     const hasBreak = hasBreakTrackingForRecords(records);
     return {
@@ -2536,14 +2667,15 @@ function getNetworkMonthlyHistory(network) {
 }
 
 function getStoreMonthlyHistory(network, store) {
-  const monthKeys = [...new Set(appState.storeData
+  const monthKeys = [...new Set([...appState.storeData, ...appState.monthlyData]
     .filter(item => item && item.rede === network && item.loja === store)
     .map(item => item.monthKey || inferRecordMonthKey(item))
     .filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
 
   return monthKeys.map(monthKey => {
-    const records = getMonthlyStoreBase(monthKey, network).filter(item => item.loja === store);
+    let records = appState.monthlyData.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey && item.rede === network && item.loja === store);
+    if (!records.length) records = getMonthlyStoreBase(monthKey, network).filter(item => item.loja === store);
     const totals = aggregateRecords(records);
     const hasBreak = hasBreakTrackingForRecords(records);
     return {
@@ -2625,8 +2757,7 @@ function renderMonthlyNetworks(monthKey) {
   destroyMonthlyStoreChart();
   destroyMonthlyNetworkHistoryChart();
 
-  let networkBase = getMonthlyStoreBase(monthKey);
-  if (!networkBase.length) networkBase = getMonthlyNetworkBase(monthKey);
+  let networkBase = getMonthlyAnalysisBase(monthKey);
   if (appState.filters.rede !== 'Todas') networkBase = networkBase.filter(item => item.rede === appState.filters.rede);
   const summaries = aggregateByNetwork(networkBase);
   const storeBase = getMonthlyStoreBase(monthKey);
@@ -2641,7 +2772,27 @@ function renderMonthlyNetworks(monthKey) {
     return;
   }
 
-  els.monthlySummaryBody.innerHTML = `<div class="monthly-network-grid">${ordered.map(item => {
+  const companyHistory = getCompanyMonthlyHistory();
+  const companyHasBreak = companyHistory.some(item => item.hasBreak);
+  const companyHistoryHtml = `<article class="monthly-history-panel monthly-history-panel--company">
+    <div class="monthly-history-head">
+      <div>
+        <p class="eyebrow">Resumo geral da empresa</p>
+        <strong>Evolução mensal • Só Folhas</strong>
+      </div>
+      <span>${companyHistory.length ? `${companyHistory[0].monthLabel} → ${companyHistory[companyHistory.length - 1].monthLabel}` : 'Sem histórico'}</span>
+    </div>
+    <div class="monthly-history-chart-wrap"><canvas id="monthlyNetworkHistoryChart"></canvas></div>
+    <div class="monthly-history-months">
+      ${companyHistory.map(item => `<div class="monthly-history-month ${item.monthKey === monthKey ? 'is-current' : ''}">
+        <span>${escapeHtml(item.monthLabel)}</span>
+        <strong>${formatCurrency(item.venda)}</strong>
+        ${item.hasBreak && item.percentualQuebra !== null ? `<small>${formatPercent(item.percentualQuebra)} quebra</small>` : '<small>Venda apenas</small>'}
+      </div>`).join('')}
+    </div>
+  </article>`;
+
+  const networkCardsHtml = `<div class="monthly-network-grid">${ordered.map(item => {
     const stores = new Set(storeBase.filter(row => row.rede === item.rede).map(row => row.loja));
     const percent = Number(item.percQuebra || 0);
     const networkRecords = networkBase.filter(row => row.rede === item.rede);
@@ -2663,12 +2814,18 @@ function renderMonthlyNetworks(monthKey) {
       <span class="monthly-network-action">${canOpen ? 'Ver lojas e histórico →' : 'Importe a base por loja'}</span>
     </button>`;
   }).join('')}</div>`;
+
+  els.monthlySummaryBody.innerHTML = companyHistoryHtml + networkCardsHtml;
+  renderMonthlyNetworkHistoryChart(companyHistory, companyHasBreak);
 }
 
 function renderMonthlyNetworkStores(monthKey, network) {
   destroyMonthlyStoreChart();
-  const records = getMonthlyStoreBase(monthKey, network);
-  const stores = aggregateMonthlyStoreDetails(records).sort((a, b) => {
+  const weeklyRecords = getMonthlyStoreBase(monthKey, network);
+  const monthlyRecords = appState.monthlyData.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey && item.rede === network);
+  const records = monthlyRecords.length ? monthlyRecords : weeklyRecords;
+  const weekCounts = new Map(aggregateMonthlyStoreDetails(weeklyRecords).map(item => [item.loja, item.weekCount]));
+  const stores = aggregateMonthlyStoreDetails(records).map(item => ({ ...item, weekCount: weekCounts.get(item.loja) || item.weekCount })).sort((a, b) => {
     const aHas = hasBreakTrackingForStore(a.rede, a.loja);
     const bHas = hasBreakTrackingForStore(b.rede, b.loja);
     if (aHas !== bHas) return aHas ? -1 : 1;
