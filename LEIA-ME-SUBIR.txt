@@ -73,7 +73,15 @@ INSTALAÇÃO
 
 
 ATUALIZAÇÃO - FECHAMENTO MENSAL OFICIAL
-- VENDA SÓ FOLHAS TOTAL.xlsx passa a ser a fonte oficial do consolidado geral mensal.
+- VENDA SÓ FOLHAS TOTAL(1).xlsx passa a ser a fonte oficial da VENDA no consolidado geral mensal.
 - A linha histórica geral e os cards gerais mensais usam o fechamento oficial de Jan-Ago/2026.
 - Rede, loja e semana continuam usando as bases operacionais, preservando o drill-down.
 - Nenhum botão, filtro ou layout foi removido.
+
+
+CORREÇÃO FINAL - MAIO E JUNHO
+- A versão anterior recebeu uma planilha com filtro ativo e gravou o fechamento geral de Maio/Junho incorretamente.
+- Maio/2026 corrigido: Venda R$ 5.111.260,94 | Quebra R$ 590.260,46 | 11,55%.
+- Junho/2026 corrigido: Venda R$ 4.965.723,72 | Quebra R$ 731.615,51 | 14,73%.
+- O detalhamento por rede, loja e semana permanece inalterado.
+- Reimportar uma semana pelo ADM continua substituindo aquela mesma combinação de mês/semana na base operacional; o fechamento geral mensal continua usando a fonte oficial.

@@ -40,7 +40,7 @@ const MONTH_OPTIONS = [
 ];
 
 // Fechamento mensal oficial da empresa.
-// Fonte: VENDA SÓ FOLHAS TOTAL.xlsx, aba NOVA, blocos "MÊS - TOTAL".
+// Fonte oficial de venda: VENDA SÓ FOLHAS TOTAL(1).xlsx, aba VENDA TOTAL, bloco 2026.
 // Esta fonte substitui apenas o consolidado geral mensal. O detalhamento por
 // rede/loja/semana continua vindo das bases operacionais importadas.
 const OFFICIAL_COMPANY_MONTHLY_CLOSINGS = Object.freeze({
@@ -48,8 +48,8 @@ const OFFICIAL_COMPANY_MONTHLY_CLOSINGS = Object.freeze({
   '2026-02': { venda: 4098404.10, quebra: 549506.11, falta: 24366.00, qualidade: 27090.10, estoque: 39331.70 },
   '2026-03': { venda: 4046127.84, quebra: 466906.58, falta: 46141.40, qualidade: 31942.90, estoque: 40209.87 },
   '2026-04': { venda: 4938225.71, quebra: 715560.23, falta: 59099.20, qualidade: 18693.50, estoque: 42233.40 },
-  '2026-05': { venda: 3986904.54, quebra: 424292.31, falta: 25135.40, qualidade: 14328.20, estoque: 0.00 },
-  '2026-06': { venda: 3901211.12, quebra: 549680.41, falta: 14347.60, qualidade: 15259.70, estoque: 0.00 },
+  '2026-05': { venda: 5111260.94, quebra: 590260.46, falta: 43940.40, qualidade: 16839.50, estoque: 28374.20 },
+  '2026-06': { venda: 4965723.72, quebra: 731615.51, falta: 27792.50, qualidade: 18280.20, estoque: 34797.40 },
   '2026-07': { venda: 5139323.55, quebra: 589778.78, falta: 37524.50, qualidade: 25411.77, estoque: 55827.32 },
   '2026-08': { venda: 3927931.57, quebra: 548896.62, falta: 63255.43, qualidade: 19777.76, estoque: 99593.74 }
 });
@@ -1669,10 +1669,14 @@ function buildSheetVerification(sheetName, records, totalRow) {
 
 function compareWorkbookTotals(grouped, totalSheet) {
   if (!totalSheet.length) return [];
+  const hasSeparateNossaKaza = totalSheet.some(item => normalizeNetworkName(item.rede) === 'NOSSA KAZA');
   return totalSheet.map(summary => {
     const network = normalizeNetworkName(summary.rede);
     let found = grouped.find(item => normalizeNetworkName(item.rede) === network);
-    if (network === 'VARIADOS' && totalSheet.some(item => normalizeNetworkName(item.rede) === 'NOSSA KAZA')) {
+    // Modelos antigos podiam trazer NOSSA KAZA embutida em VARIADOS.
+    // Se o consolidado já possui uma linha própria de NOSSA KAZA, as duas redes
+    // devem ser conferidas separadamente para não gerar divergência falsa.
+    if (network === 'VARIADOS' && !hasSeparateNossaKaza) {
       const nossaKaza = grouped.find(item => normalizeNetworkName(item.rede) === 'NOSSA KAZA');
       if (found && nossaKaza) {
         found = {
@@ -2436,16 +2440,36 @@ function getMonthlySummaryMonthKey() {
 }
 
 function getMonthlyNetworkBase(monthKey) {
-  const official = appState.data.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey);
-  const officialNetworks = new Set(official.map(item => item.rede));
-  const fallback = appState.storeData.filter(item => {
+  const imported = appState.data.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey);
+  if (!imported.length) {
+    return appState.storeData.filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey);
+  }
+
+  // A importação é semanal. Uma nova semana/reimportação substitui somente a
+  // mesma rede naquela semana; as demais semanas continuam vindo do histórico.
+  const coveredNetworkWeeks = new Set(imported.map(item => {
+    const week = String(item.semana || '').trim();
+    return `${week}|${normalizeNetworkName(item.rede)}`;
+  }));
+
+  const historical = appState.storeData.filter(item => {
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
-    return sameMonth && !officialNetworks.has(item.rede);
+    if (!sameMonth) return false;
+    const week = String(item.semana || '').trim();
+    return !coveredNetworkWeeks.has(`${week}|${normalizeNetworkName(item.rede)}`);
   });
-  return [...official, ...fallback];
+
+  return [...historical, ...imported];
 }
 
 function getMonthlyAnalysisBase(monthKey, network = '') {
+  // Havendo nova importação semanal, ela deve atualizar o acumulado do mês em
+  // vez de ficar escondida atrás do snapshot mensal histórico.
+  const hasWeeklyImport = appState.data.some(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey);
+  if (hasWeeklyImport) {
+    return getMonthlyNetworkBase(monthKey).filter(item => !network || item.rede === network);
+  }
+
   const monthly = appState.monthlyData.filter(item => {
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
     const sameNetwork = !network || item.rede === network;
@@ -2456,11 +2480,34 @@ function getMonthlyAnalysisBase(monthKey, network = '') {
 }
 
 function getMonthlyStoreBase(monthKey, network = '') {
-  return appState.storeData.filter(item => {
+  const importedDetails = appState.data.filter(item => {
     const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
     const sameNetwork = !network || item.rede === network;
-    return sameMonth && sameNetwork;
+    return sameMonth && sameNetwork && !item.isNetworkTotalOnly;
   });
+
+  if (!importedDetails.length) {
+    return appState.storeData.filter(item => {
+      const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
+      const sameNetwork = !network || item.rede === network;
+      return sameMonth && sameNetwork;
+    });
+  }
+
+  const coveredNetworkWeeks = new Set(importedDetails.map(item => {
+    const week = String(item.semana || '').trim();
+    return `${week}|${normalizeNetworkName(item.rede)}`;
+  }));
+
+  const historical = appState.storeData.filter(item => {
+    const sameMonth = (item.monthKey || inferRecordMonthKey(item)) === monthKey;
+    const sameNetwork = !network || item.rede === network;
+    if (!sameMonth || !sameNetwork) return false;
+    const week = String(item.semana || '').trim();
+    return !coveredNetworkWeeks.has(`${week}|${normalizeNetworkName(item.rede)}`);
+  });
+
+  return [...historical, ...importedDetails];
 }
 
 function aggregateMonthlyStoreDetails(records) {
@@ -2586,9 +2633,40 @@ function getBreakDisplayForStore(network, store, percent = 0, sale = 0) {
 function getOfficialCompanyMonthlyClosing(monthKey) {
   const closing = OFFICIAL_COMPANY_MONTHLY_CLOSINGS[monthKey];
   if (!closing) return null;
+
+  let resolved = { ...closing };
+
+  // Agosto/2026 foi validado inicialmente até a 3ª semana. Quando a 4ª/5ª
+  // semana entra pelo ADM, o fechamento geral passa a ser o fechamento oficial
+  // das 3 primeiras semanas + as novas semanas importadas.
+  if (monthKey === '2026-08') {
+    const extraRecords = appState.data.filter(item => {
+      const itemMonth = item.monthKey || inferRecordMonthKey(item);
+      const weekOrder = weekSortValue(item.semana);
+      return itemMonth === monthKey && Number.isFinite(weekOrder) && weekOrder >= 4 && weekOrder < Number.MAX_SAFE_INTEGER;
+    });
+
+    if (extraRecords.length) {
+      const extra = aggregateRecords(extraRecords);
+      const latestWeekOrder = Math.max(...extraRecords.map(item => weekSortValue(item.semana)).filter(Number.isFinite));
+      const latestCostaRecords = extraRecords.filter(item => item.rede === 'COSTA' && weekSortValue(item.semana) === latestWeekOrder);
+      const latestStock = latestCostaRecords.length
+        ? latestCostaRecords.reduce((sum, item) => sum + Number(item.valorEstoque || 0), 0)
+        : Number(closing.estoque || 0);
+
+      resolved = {
+        venda: Number((Number(closing.venda || 0) + Number(extra.venda || 0)).toFixed(2)),
+        quebra: Number((Number(closing.quebra || 0) + Number(extra.quebra || 0)).toFixed(2)),
+        falta: Number((Number(closing.falta || 0) + Number(extra.falta || 0)).toFixed(2)),
+        qualidade: Number((Number(closing.qualidade || 0) + Number(extra.qualidade || 0)).toFixed(2)),
+        estoque: Number(latestStock.toFixed(2))
+      };
+    }
+  }
+
   return {
-    ...closing,
-    percentualQuebra: closing.venda > 0 ? Number(((closing.quebra / closing.venda) * 100).toFixed(2)) : 0
+    ...resolved,
+    percentualQuebra: resolved.venda > 0 ? Number(((resolved.quebra / resolved.venda) * 100).toFixed(2)) : 0
   };
 }
 
