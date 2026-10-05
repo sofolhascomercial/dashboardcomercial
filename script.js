@@ -580,31 +580,38 @@ function mergePreloadedHistory() {
 function mergePreloadedSeptember() {
   const seed = window.__SOFOLHAS_PRELOADED_SEPTEMBER__;
   if (!seed || !Array.isArray(seed.records) || !seed.records.length) return false;
-  const version = String(seed.version || 'setembro-2026-4-semanas-west-v1');
+
+  const version = String(seed.version || 'setembro-2026-4-semanas-west-v2-safe');
   if (appState.config.septemberSeedVersion === version) return false;
 
   const monthKey = String(seed.monthKey || '2026-09');
-  const isSeptember = item => (item?.monthKey || inferRecordMonthKey(item || {})) === monthKey;
+  const isTargetMonth = item => (item?.monthKey || inferRecordMonthKey(item || {})) === monthKey;
 
-  // Setembro enviado pelo usuário passa a ser a fotografia inicial oficial do mês.
-  // A migração afeta somente Setembro e não toca nos meses anteriores.
-  appState.data = appState.data.filter(item => !isSeptember(item));
-  appState.imports = appState.imports.filter(item => !isSeptember(item));
-  appState.storeData = appState.storeData.filter(item => !isSeptember(item));
-  appState.storeImports = appState.storeImports.filter(item => !isSeptember(item));
-  appState.monthlyData = appState.monthlyData.filter(item => !isSeptember(item));
+  // Atualiza somente Setembro. Janeiro a Agosto permanecem intocados.
+  // Os registros detalhados ficam em storeData; evitamos duplicá-los também em
+  // data para reduzir o tamanho do estado e não exceder o limite do localStorage.
+  appState.data = appState.data.filter(item => !isTargetMonth(item));
+  appState.imports = appState.imports.filter(item => !isTargetMonth(item));
+  appState.storeData = appState.storeData.filter(item => !isTargetMonth(item));
+  appState.storeImports = appState.storeImports.filter(item => !isTargetMonth(item));
+  appState.monthlyData = appState.monthlyData.filter(item => !isTargetMonth(item));
 
-  const records = seed.records.map(normalizeStoredRecord);
-  const storeRecords = seed.records.map(normalizeStoredStoreRecord);
-  appState.data.push(...records);
-  appState.storeData.push(...storeRecords);
+  const seededRecords = seed.records.map(record => normalizeStoredStoreRecord({
+    ...record,
+    historySource: 'setembro-2026',
+    sourceType: 'store-detail'
+  }));
+  appState.storeData.push(...seededRecords);
 
-  const networkBatches = (seed.batches || []).map(normalizeStoredImport);
-  const storeBatches = networkBatches.map(batch => ({ ...batch, id: `store-${batch.id}`, type: 'store-detail', isPreloadedSeptember: true }));
-  appState.imports = [...networkBatches, ...appState.imports]
-    .sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
-  appState.storeImports = [...storeBatches, ...appState.storeImports]
-    .sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+  const seedBatches = (seed.batches || []).map(batch => normalizeStoredImport({
+    ...batch,
+    type: 'store-detail',
+    isPreloadedSeptember: true
+  }));
+  appState.storeImports = [
+    ...seedBatches,
+    ...appState.storeImports.filter(item => !item?.isPreloadedSeptember && !isTargetMonth(item))
+  ].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
 
   appState.config.septemberSeedVersion = version;
   appState.config.septemberSeededAt = new Date().toISOString();
@@ -1584,8 +1591,7 @@ function parseDataWorksheet({ sheetName, rows, batchId, fileName, importedAt, we
       rede = 'BRETAS'; venda = parseMoney(getFlexibleCell(row, [['VENDA']])); quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'TOTAL'], ['PERCENTUAL']]));
     } else if (model === 'WEST') {
-      // WEST CARNES: a aba REDE WEST é a fonte oficial. A coluna VENDA SETEMBRO
-      // é a venda usada no dashboard; SÓ FOLHAS TOTAL não sobrescreve esta aba.
+      // WEST CARNES: a aba REDE WEST é a fonte oficial.
       rede = 'WEST CARNES';
       venda = parseMoney(getFlexibleCell(row, [['VENDA', 'SETEMBRO'], ['VENDA', 'TOTAL'], ['VENDA']]));
       falta = parseMoney(getFlexibleCell(row, [['FALTA']]));
@@ -1735,8 +1741,8 @@ function compareWorkbookTotals(grouped, totalSheet) {
   const hasSeparateNossaKaza = totalSheet.some(item => normalizeNetworkName(item.rede) === 'NOSSA KAZA');
   return totalSheet.map(summary => {
     const network = normalizeNetworkName(summary.rede);
-    // WEST CARNES é validada exclusivamente pela aba REDE WEST, conforme regra
-    // operacional. A linha WEST do SÓ FOLHAS TOTAL pode estar divergente.
+    // Para WEST CARNES, a aba REDE WEST é a fonte correta. A linha no
+    // consolidado SÓ FOLHAS TOTAL pode estar incorreta e não é usada.
     if (network === 'WEST CARNES') return null;
     let found = grouped.find(item => normalizeNetworkName(item.rede) === network);
     // Modelos antigos podiam trazer NOSSA KAZA embutida em VARIADOS.
@@ -1853,7 +1859,11 @@ function refreshAll() {
 }
 
 function getLatestImportMonthKey() {
-  return appState.imports[0]?.monthKey || appState.storeImports[0]?.monthKey || inferRecordMonthKey({ importedAt: appState.config.ultimaImportacao || appState.config.ultimaAtualizacao });
+  const candidates = [...appState.imports, ...appState.storeImports]
+    .map(item => item?.monthKey || inferRecordMonthKey(item || {}))
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a, 'pt-BR', { numeric: true }));
+  return candidates[0] || inferRecordMonthKey({ importedAt: appState.config.ultimaImportacao || appState.config.ultimaAtualizacao });
 }
 
 function filterToLatestImportMonth(records) {
@@ -2500,12 +2510,7 @@ function buildSalesSeries(records) {
 
 function getMonthlySummaryMonthKey() {
   if (appState.filters.mes !== 'Todas') return appState.filters.mes;
-  const candidates = [
-    appState.imports[0]?.monthKey || inferRecordMonthKey(appState.imports[0] || {}),
-    appState.storeImports[0]?.monthKey || inferRecordMonthKey(appState.storeImports[0] || {}),
-    getLatestImportMonthKey()
-  ].filter(Boolean);
-  return candidates.sort((a, b) => b.localeCompare(a, 'pt-BR', { numeric: true }))[0] || '';
+  return getLatestImportMonthKey();
 }
 
 function getMonthlyNetworkBase(monthKey) {
@@ -3605,7 +3610,12 @@ function readStorage() {
 }
 
 function persistLocal(options = {}) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(exportStateSnapshot()));
+  const snapshot = exportStateSnapshot();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+  } catch (error) {
+    console.warn('Não foi possível salvar todo o estado no armazenamento local; mantendo o painel ativo e sincronizando pelo Firebase quando disponível.', error);
+  }
   if (!options.skipRemote) queueRemotePersist();
 }
 
