@@ -1,6 +1,6 @@
 DASHBOARD COMERCIAL SÓ FOLHAS — V4 OFICIAL ATUALIZADA
 Base canônica: dashboard-comercial-historico-loja-curva-v4(1).zip
-Atualização: 31/08/2026
+Atualização: 05/10/2026
 
 ARQUIVOS PARA SUBIR
 - index.html
@@ -85,3 +85,15 @@ CORREÇÃO FINAL - MAIO E JUNHO
 - Junho/2026 corrigido: Venda R$ 4.965.723,72 | Quebra R$ 731.615,51 | 14,73%.
 - O detalhamento por rede, loja e semana permanece inalterado.
 - Reimportar uma semana pelo ADM continua substituindo aquela mesma combinação de mês/semana na base operacional; o fechamento geral mensal continua usando a fonte oficial.
+
+
+ATUALIZAÇÃO 05/10/2026 — SETEMBRO + WEST CARNES
+- WEST CARNES foi adicionada como rede própria em filtros, resumo por rede, gráficos, ranking, ADM e histórico.
+- WEST CARNES possui acompanhamento de quebra.
+- Fonte oficial da WEST CARNES: aba REDE WEST.
+- Para WEST, a coluna VENDA SETEMBRO é usada como Venda no dashboard; QUEBRA REAL como Quebra; FALTA como Falta.
+- A linha WEST da aba SÓ FOLHAS TOTAL não sobrescreve nem valida a aba REDE WEST, pois foi confirmada como incorreta.
+- Setembro/2026 foi pré-carregado com as 4 semanas enviadas.
+- A 1ª semana não possui REDE WEST; WEST começa na 2ª semana.
+- Acumulado WEST da 2ª à 4ª semana: Venda R$ 42.241,43 | Quebra R$ 12.345,71 | Falta R$ 1.002,25 | 29,23% de quebra.
+- O restante do layout e das funções da V4 oficial permanece preservado.

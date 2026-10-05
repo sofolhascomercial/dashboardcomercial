@@ -7,7 +7,8 @@ const NETWORKS = [
   { id: 'ASSAÍ', label: 'ASSAÍ', hasBreak: true },
   { id: 'VARIADOS', label: 'VARIADOS', hasBreak: true },
   { id: 'CONSIGNADOS', label: 'CONSIGNADOS', hasBreak: true },
-  { id: 'NOSSA KAZA', label: 'NOSSA KAZA', hasBreak: false }
+  { id: 'NOSSA KAZA', label: 'NOSSA KAZA', hasBreak: false },
+  { id: 'WEST CARNES', label: 'WEST CARNES', hasBreak: true }
 ];
 
 const ADM_CREDENTIALS = {
@@ -426,6 +427,7 @@ function normalizeNetworkName(value) {
   if (normalized.includes('variados') || normalized.includes('variado')) return 'VARIADOS';
   if (normalized.includes('consignados') || normalized.includes('consignado')) return 'CONSIGNADOS';
   if (normalized.includes('nossa kaza') || normalized.includes('nossa casa')) return 'NOSSA KAZA';
+  if (normalized.includes('west')) return 'WEST CARNES';
   return String(value || '').trim().toUpperCase();
 }
 
@@ -575,6 +577,43 @@ function mergePreloadedHistory() {
 }
 
 
+function mergePreloadedSeptember() {
+  const seed = window.__SOFOLHAS_PRELOADED_SEPTEMBER__;
+  if (!seed || !Array.isArray(seed.records) || !seed.records.length) return false;
+  const version = String(seed.version || 'setembro-2026-4-semanas-west-v1');
+  if (appState.config.septemberSeedVersion === version) return false;
+
+  const monthKey = String(seed.monthKey || '2026-09');
+  const isSeptember = item => (item?.monthKey || inferRecordMonthKey(item || {})) === monthKey;
+
+  // Setembro enviado pelo usuário passa a ser a fotografia inicial oficial do mês.
+  // A migração afeta somente Setembro e não toca nos meses anteriores.
+  appState.data = appState.data.filter(item => !isSeptember(item));
+  appState.imports = appState.imports.filter(item => !isSeptember(item));
+  appState.storeData = appState.storeData.filter(item => !isSeptember(item));
+  appState.storeImports = appState.storeImports.filter(item => !isSeptember(item));
+  appState.monthlyData = appState.monthlyData.filter(item => !isSeptember(item));
+
+  const records = seed.records.map(normalizeStoredRecord);
+  const storeRecords = seed.records.map(normalizeStoredStoreRecord);
+  appState.data.push(...records);
+  appState.storeData.push(...storeRecords);
+
+  const networkBatches = (seed.batches || []).map(normalizeStoredImport);
+  const storeBatches = networkBatches.map(batch => ({ ...batch, id: `store-${batch.id}`, type: 'store-detail', isPreloadedSeptember: true }));
+  appState.imports = [...networkBatches, ...appState.imports]
+    .sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+  appState.storeImports = [...storeBatches, ...appState.storeImports]
+    .sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+
+  appState.config.septemberSeedVersion = version;
+  appState.config.septemberSeededAt = new Date().toISOString();
+  appState.config.ultimaAtualizacao = new Date().toISOString();
+  appState.config.ultimaImportacao = seed.generatedAt || new Date().toISOString();
+  return true;
+}
+
+
 
 async function init() {
   cacheElements();
@@ -700,7 +739,8 @@ async function seedInitialState() {
   firebaseBridge.initialLoadComplete = true;
 
   const historyChanged = mergePreloadedHistory();
-  if (historyChanged) {
+  const septemberChanged = mergePreloadedSeptember();
+  if (historyChanged || septemberChanged) {
     syncMesOptions();
     syncSemanaOptions();
     persistLocal();
@@ -717,7 +757,8 @@ function defaultMetasPorRede() {
     'ASSAÍ': 100000,
     'VARIADOS': 80000,
     'CONSIGNADOS': 170000,
-    'NOSSA KAZA': 0
+    'NOSSA KAZA': 0,
+    'WEST CARNES': 0
   };
 }
 
@@ -1268,6 +1309,7 @@ function inferStoreDetailNetwork(sheetName, rows = []) {
   if (normalized.includes('consignad')) return 'CONSIGNADOS';
   if (normalized.includes('variad')) return 'VARIADOS';
   if (normalized.includes('nossa kaza') || normalized.includes('nossa casa')) return 'NOSSA KAZA';
+  if (normalized.includes('west')) return 'WEST CARNES';
 
   // O modelo de loja usa "Planilha7" para Economart/Cerramix. No dashboard semanal
   // essas unidades pertencem à rede CONSIGNADOS.
@@ -1286,7 +1328,9 @@ function parseStoreDetailSheet({ network, sheetName, rows, batchId, fileName, im
     const rede = normalizedStore.rede || network;
     const store = normalizedStore.loja || originalStore;
 
-    const venda = parseMoney(getFlexibleCell(row, [['VENDA']]));
+    const venda = network === 'WEST CARNES'
+      ? parseMoney(getFlexibleCell(row, [['VENDA', 'SETEMBRO'], ['VENDA', 'TOTAL'], ['VENDA']]))
+      : parseMoney(getFlexibleCell(row, [['VENDA']]));
     const falta = parseMoney(getFlexibleCell(row, [['DEV', 'FALTA'], ['FALTA']]));
     const qualidade = parseMoney(getFlexibleCell(row, [['DEV', 'QUALIDADE'], ['QUALIDADE']]));
     const estoque = parseMoney(getFlexibleCell(row, [['ESTOQUE', 'EM', 'LOJA'], ['ESTOQUE', 'LOJA'], ['ESTOQUE']]));
@@ -1335,7 +1379,9 @@ function buildStoreSheetVerification(sheetName, records, totalRow) {
   if (!records.length) return null;
   if (!totalRow) return { type: 'store-sheet', sheetName, status: 'ok', label: 'Sem linha Total para conferir' };
   const totals = aggregateRecords(records);
-  const expectedVenda = parseMoney(getFlexibleCell(totalRow, [['VENDA']]));
+  const expectedVenda = normalizeNetworkName(records[0]?.rede) === 'WEST CARNES'
+    ? parseMoney(getFlexibleCell(totalRow, [['VENDA', 'SETEMBRO'], ['VENDA', 'TOTAL'], ['VENDA']]))
+    : parseMoney(getFlexibleCell(totalRow, [['VENDA']]));
   const expectedQuebra = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['QUEBRA', 'PARCIAL'], ['QUEBRA']]));
   const vendaDiff = Number((totals.venda - expectedVenda).toFixed(2));
   const quebraDiff = Number((totals.quebra - expectedQuebra).toFixed(2));
@@ -1537,6 +1583,14 @@ function parseDataWorksheet({ sheetName, rows, batchId, fileName, importedAt, we
     } else if (model === 'BRETAS') {
       rede = 'BRETAS'; venda = parseMoney(getFlexibleCell(row, [['VENDA']])); quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
       percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'TOTAL'], ['PERCENTUAL']]));
+    } else if (model === 'WEST') {
+      // WEST CARNES: a aba REDE WEST é a fonte oficial. A coluna VENDA SETEMBRO
+      // é a venda usada no dashboard; SÓ FOLHAS TOTAL não sobrescreve esta aba.
+      rede = 'WEST CARNES';
+      venda = parseMoney(getFlexibleCell(row, [['VENDA', 'SETEMBRO'], ['VENDA', 'TOTAL'], ['VENDA']]));
+      falta = parseMoney(getFlexibleCell(row, [['FALTA']]));
+      quebraOperacional = parseMoney(getFlexibleCell(row, [['QUEBRA', 'REAL'], ['QUEBRA']]));
+      percentualQuebra = parsePercent(getFlexibleCell(row, [['%', 'TOTAL'], ['PERCENTUAL']]));
     } else {
       venda = parseMoney(getFlexibleCell(row, [['VALOR', 'ENTREGA', 'TOTAL'], ['VENDA']]));
       falta = parseMoney(getFlexibleCell(row, [['DEV', 'FALTA'], ['VALOR', 'FALTA'], ['FALTA']]));
@@ -1553,6 +1607,7 @@ function parseDataWorksheet({ sheetName, rows, batchId, fileName, importedAt, we
     else if ((normalizedSheet.includes('comper') || normalizedSheet.includes('fort')) && model === 'GENERICO') rede = 'COMPER/FORT';
     else if (normalizedSheet.includes('dia a dia') && model === 'GENERICO') rede = 'ATACADÃO DIA A DIA';
     else if (normalizedSheet.includes('assa') && model === 'GENERICO') rede = 'ASSAÍ';
+    else if (normalizedSheet.includes('west') && model === 'GENERICO') rede = 'WEST CARNES';
 
     const normalizedStore = normalizeStoreAndNetwork(originalStore, rede);
     rede = normalizedStore.rede || rede;
@@ -1602,6 +1657,7 @@ function inferNetworkBySheetName(sheetName) {
   if (normalized.includes('bretas')) return 'BRETAS';
   if (normalized.includes('assa')) return 'ASSAÍ';
   if (normalized.includes('vivendas')) return 'VIVENDAS';
+  if (normalized.includes('west')) return 'WEST CARNES';
   return '';
 }
 
@@ -1615,6 +1671,7 @@ function detectWorksheetModel(sheetName, row) {
   if (normalized.includes('consignados')) return 'CONSIGNADOS';
   if (normalized.includes('assa')) return 'ASSAI';
   if (normalized.includes('bretas')) return 'BRETAS';
+  if (normalized.includes('west')) return 'WEST';
 
   if (getFlexibleCell(row, [['LOJAS', 'VIVENDAS']])) return 'VIVENDAS';
   if (getFlexibleCell(row, [['LOJAS', 'ASSAI']])) return 'ASSAI';
@@ -1632,13 +1689,16 @@ function buildSheetVerification(sheetName, records, totalRow) {
   const model = detectWorksheetModel(sheetName, totalRow || records[0] || {});
   const totals = aggregateRecords(records);
   const totalEstoque = records.reduce((sum, item) => sum + Number(item.valorEstoque || 0), 0);
-  const vendaEsperada = parseMoney(getFlexibleCell(totalRow, [['VALOR', 'ENTREGA', 'TOTAL'], ['VENDA']]));
+  const vendaEsperada = model === 'WEST'
+    ? parseMoney(getFlexibleCell(totalRow, [['VENDA', 'SETEMBRO'], ['VENDA', 'TOTAL'], ['VENDA']]))
+    : parseMoney(getFlexibleCell(totalRow, [['VALOR', 'ENTREGA', 'TOTAL'], ['VENDA']]));
   let quebraEsperada = 0;
   if (model === 'DIA_A_DIA') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['QUEBRA']]));
   else if (model === 'PEREIRA') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'PARCIAL'], ['QUEBRA', 'REAL'], ['QUEBRA']]));
   else if (model === 'VIVENDAS' || model === 'CONSIGNADOS' || model === 'ASSAI') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA']]));
   else if (model === 'COSTA') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['VALOR', 'QUEBRA'], ['QUEBRA']]));
   else if (model === 'BRETAS') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'TOTAL'], ['QUEBRA']]));
+  else if (model === 'WEST') quebraEsperada = parseMoney(getFlexibleCell(totalRow, [['QUEBRA', 'REAL'], ['QUEBRA']]));
 
   const details = [buildVerificationDetail('Venda', vendaEsperada, totals.venda, { alwaysInclude: true })];
   if (model === 'DIA_A_DIA') {
@@ -1651,6 +1711,9 @@ function buildSheetVerification(sheetName, records, totalRow) {
     details.push(buildVerificationDetail('Quebra parcial', quebraEsperada, totals.quebra));
   } else if (model === 'VIVENDAS' || model === 'CONSIGNADOS' || model === 'ASSAI' || model === 'BRETAS') {
     details.push(buildVerificationDetail('Quebra', quebraEsperada, totals.quebra));
+  } else if (model === 'WEST') {
+    details.push(buildVerificationDetail('Falta', parseMoney(getFlexibleCell(totalRow, [['FALTA']])), totals.falta));
+    details.push(buildVerificationDetail('Quebra real', quebraEsperada, totals.quebra));
   } else if (model === 'COSTA') {
     details.push(buildVerificationDetail('Estoque', parseMoney(getFlexibleCell(totalRow, [['ESTOQUE', 'EM', 'LOJA'], ['VALOR', 'EST'], ['ESTOQUE']])), totalEstoque));
     details.push(buildVerificationDetail('Falta', parseMoney(getFlexibleCell(totalRow, [['DEVOLUCAO', 'FALTA'], ['VALOR', 'FALTA'], ['FALTA']])), totals.falta));
@@ -1672,6 +1735,9 @@ function compareWorkbookTotals(grouped, totalSheet) {
   const hasSeparateNossaKaza = totalSheet.some(item => normalizeNetworkName(item.rede) === 'NOSSA KAZA');
   return totalSheet.map(summary => {
     const network = normalizeNetworkName(summary.rede);
+    // WEST CARNES é validada exclusivamente pela aba REDE WEST, conforme regra
+    // operacional. A linha WEST do SÓ FOLHAS TOTAL pode estar divergente.
+    if (network === 'WEST CARNES') return null;
     let found = grouped.find(item => normalizeNetworkName(item.rede) === network);
     // Modelos antigos podiam trazer NOSSA KAZA embutida em VARIADOS.
     // Se o consolidado já possui uma linha própria de NOSSA KAZA, as duas redes
@@ -1722,7 +1788,7 @@ function inferNetworkByStore(store) {
     ['ATACADÃO DIA A DIA', ['dd ', 'dia a dia', 'atacadao dia a dia', 'atacadão dia a dia']],
     ['COMPER/FORT', ['comper', 'fort']], ['VIVENDAS', ['vivendas']], ['BRETAS', ['bretas']], ['COSTA', ['costa']],
     ['ASSAÍ', ['assai', 'assaí']], ['VARIADOS', ['emporio', 'mercado', 'variado']], ['CONSIGNADOS', ['consignado']],
-    ['NOSSA KAZA', ['nossa kaza', 'nossa casa']]
+    ['NOSSA KAZA', ['nossa kaza', 'nossa casa']], ['WEST CARNES', ['west carnes', 'west']]
   ];
   const match = rules.find(([_, terms]) => terms.some(term => normalized.includes(term)));
   return match ? match[0] : '';
@@ -2434,9 +2500,12 @@ function buildSalesSeries(records) {
 
 function getMonthlySummaryMonthKey() {
   if (appState.filters.mes !== 'Todas') return appState.filters.mes;
-  const storeKey = appState.storeImports[0]?.monthKey || inferRecordMonthKey(appState.storeImports[0] || {});
-  if (storeKey) return storeKey;
-  return getLatestImportMonthKey();
+  const candidates = [
+    appState.imports[0]?.monthKey || inferRecordMonthKey(appState.imports[0] || {}),
+    appState.storeImports[0]?.monthKey || inferRecordMonthKey(appState.storeImports[0] || {}),
+    getLatestImportMonthKey()
+  ].filter(Boolean);
+  return candidates.sort((a, b) => b.localeCompare(a, 'pt-BR', { numeric: true }))[0] || '';
 }
 
 function getMonthlyNetworkBase(monthKey) {
