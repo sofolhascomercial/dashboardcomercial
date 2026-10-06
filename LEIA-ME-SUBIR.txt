@@ -27,3 +27,16 @@ IMPORTANTE
 - Publique TODOS os arquivos acima no mesmo diretório.
 - Depois faça Ctrl + F5 no navegador.
 - Se a versão anterior quebrada chegou a ser aberta, esta versão usa uma nova versão da semente de Setembro e reconcilia somente Setembro, preservando os demais meses.
+
+
+ATUALIZAÇÃO 06/10/2026 — SETEMBRO OFICIAL
+- Bases detalhadas atualizadas para as versões (2) das 4 semanas de setembro.
+- ASSAÍ 1ª e 4ª semanas corrigidos conforme as planilhas mais recentes.
+- WEST permanece usando a aba REDE WEST como fonte.
+- NOSSA KAZA corrigida para R$ 215.559,30 no fechamento mensal.
+- Fechamento mensal oficial de setembro:
+  Venda R$ 4.629.845,67 | Quebra R$ 706.774,11 | Falta R$ 78.525,53 |
+  Qualidade R$ 21.567,28 | Estoque R$ 77.274,06 | % Quebra 15,27%.
+- A diferença de R$ 2.713,30 na quebra detalhada do DIA A DIA foi desconsiderada
+  no fechamento oficial, conforme orientação do usuário. O detalhamento por loja
+  permanece vindo das abas detalhadas.

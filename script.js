@@ -52,8 +52,24 @@ const OFFICIAL_COMPANY_MONTHLY_CLOSINGS = Object.freeze({
   '2026-05': { venda: 5111260.94, quebra: 590260.46, falta: 43940.40, qualidade: 16839.50, estoque: 28374.20 },
   '2026-06': { venda: 4965723.72, quebra: 731615.51, falta: 27792.50, qualidade: 18280.20, estoque: 34797.40 },
   '2026-07': { venda: 5139323.55, quebra: 589778.78, falta: 37524.50, qualidade: 25411.77, estoque: 55827.32 },
-  '2026-08': { venda: 3927931.57, quebra: 548896.62, falta: 63255.43, qualidade: 19777.76, estoque: 99593.74 }
+  '2026-08': { venda: 3927931.57, quebra: 548896.62, falta: 63255.43, qualidade: 19777.76, estoque: 99593.74 },
+  '2026-09': { venda: 4629845.67, quebra: 706774.11, falta: 78525.53, qualidade: 21567.28, estoque: 77274.06 }
 });
+const OFFICIAL_NETWORK_MONTHLY_CLOSINGS = Object.freeze({
+  '2026-09': Object.freeze({
+    'ATACADÃO DIA A DIA': { venda: 2252057.00, quebra: 349016.73, falta: 44740.60, qualidade: 15100.10, estoque: 0 },
+    'COMPER/FORT': { venda: 535457.30, quebra: 76574.80, falta: 7064.80, qualidade: 4634.10, estoque: 0 },
+    'VIVENDAS': { venda: 151536.00, quebra: 37441.89, falta: 0, qualidade: 0, estoque: 0 },
+    'BRETAS': { venda: 122291.00, quebra: 3654.96, falta: 0, qualidade: 0, estoque: 0 },
+    'COSTA': { venda: 892589.23, quebra: 187338.46, falta: 26720.13, qualidade: 1833.08, estoque: 77274.06 },
+    'ASSAÍ': { venda: 301596.10, quebra: 32448.22, falta: 0, qualidade: 0, estoque: 0 },
+    'VARIADOS': { venda: 45379.10, quebra: 0, falta: 0, qualidade: 0, estoque: 0 },
+    'CONSIGNADOS': { venda: 71139.21, quebra: 7953.34, falta: 0, qualidade: 0, estoque: 0 },
+    'NOSSA KAZA': { venda: 215559.30, quebra: 0, falta: 0, qualidade: 0, estoque: 0 },
+    'WEST CARNES': { venda: 42241.43, quebra: 12345.71, falta: 0, qualidade: 0, estoque: 0 }
+  })
+});
+
 const COMPER_FORT_STORE_MAPPINGS = [
   ['G.P - 77 VALPARAISO', 'FORT VALPARAÍSO'],
   ['G.P - 58 AGUAS CLARAS', 'COMPER ÁGUAS CLARAS'],
@@ -581,7 +597,7 @@ function mergePreloadedSeptember() {
   const seed = window.__SOFOLHAS_PRELOADED_SEPTEMBER__;
   if (!seed || !Array.isArray(seed.records) || !seed.records.length) return false;
 
-  const version = String(seed.version || 'setembro-2026-4-semanas-west-v2-safe');
+  const version = String(seed.version || 'setembro-2026-4-semanas-west-v3-fechamento-oficial');
   if (appState.config.septemberSeedVersion === version) return false;
 
   const monthKey = String(seed.monthKey || '2026-09');
@@ -2136,9 +2152,7 @@ function renderTopInfo(filtered) {
   const displayRecords = getDisplayRecords(filtered);
   const calculatedTotals = aggregateRecords(displayRecords);
   const activeMonthKey = getActiveCompanyMonthKey(displayRecords);
-  const officialClosing = shouldUseOfficialCompanyMonthlyClosing(displayRecords)
-    ? getOfficialCompanyMonthlyClosing(activeMonthKey)
-    : null;
+  const officialClosing = getOfficialClosingForCurrentScope(displayRecords);
   const totals = officialClosing
     ? {
         ...calculatedTotals,
@@ -2188,13 +2202,17 @@ function renderTopInfo(filtered) {
 
 function renderSummaryTable(filtered) {
   const displayRecords = getDisplayRecords(filtered);
+  const monthKey = getActiveCompanyMonthKey(displayRecords);
+  const useOfficial = appState.filters.semana === 'Todas' && appState.filters.loja === 'Todas';
   const networks = appState.filters.rede === 'Todas'
     ? NETWORKS.map(item => item.id)
     : [appState.filters.rede];
 
   els.summaryTableBody.innerHTML = networks.map(networkId => {
     const records = displayRecords.filter(item => item.rede === networkId);
-    if (!records.length) {
+    const official = useOfficial ? getOfficialNetworkMonthlyClosing(monthKey, networkId) : null;
+
+    if (!records.length && !official) {
       return `<tr>
         <td>${networkId}</td>
         <td>${formatCurrency(0)}</td>
@@ -2205,21 +2223,35 @@ function renderSummaryTable(filtered) {
         <td><span class="status-badge status--neutral">Sem dados</span></td>
       </tr>`;
     }
-    const totals = aggregateRecords(records);
+
+    const calculated = aggregateRecords(records);
+    const totals = official ? {
+      ...calculated,
+      venda: official.venda,
+      quebra: official.quebra,
+      falta: official.falta,
+      qualidade: official.qualidade,
+      estoque: official.estoque
+    } : calculated;
     const meta = appState.config.metasPorRede[networkId] || 0;
     const percentMeta = meta > 0 ? (totals.venda / meta) * 100 : 0;
-    const hasBreak = hasBreakTrackingForRecords(records);
-    const status = hasBreak ? getBreakStatus(totals.percQuebra) : { label: 'Venda apenas', className: 'status--neutral' };
+    const networkConfig = NETWORKS.find(item => item.id === networkId);
+    const hasBreak = official
+      ? networkConfig?.hasBreak !== false && Math.abs(Number(official.quebra || 0)) > 0.005
+      : hasBreakTrackingForRecords(records);
+    const percQuebra = totals.venda > 0 ? (totals.quebra / totals.venda) * 100 : 0;
+    const status = hasBreak ? getBreakStatus(percQuebra) : { label: 'Venda apenas', className: 'status--neutral' };
+
     return `<tr>
       <td>${networkId}</td>
       <td>${formatCurrency(totals.venda)}</td>
       <td>${formatCurrency(meta)}</td>
       <td>${percentMeta.toFixed(0)}%</td>
       <td>${hasBreak ? formatCurrency(totals.quebra) : '—'}</td>
-      <td>${hasBreak ? formatPercent(totals.percQuebra) : '—'}</td>
+      <td>${hasBreak ? formatPercent(percQuebra) : '—'}</td>
       <td>${hasBreak ? `<span class="status-badge ${status.className}">${status.label}</span>` : '<span class="sales-only-label">Venda apenas</span>'}</td>
     </tr>`;
-  }).filter(Boolean).join('');
+  }).join('');
 }
 
 function renderDetailsTable(filtered) {
@@ -2327,8 +2359,16 @@ function renderAlerts(filtered) {
   const displayRecords = getDisplayRecords(filtered);
   const totals = aggregateRecords(displayRecords);
   const hasBreak = hasBreakTrackingForRecords(displayRecords);
+  const alertMonthKey = getActiveCompanyMonthKey(displayRecords);
   const summaryByNetwork = aggregateByNetwork(displayRecords)
-    .filter(item => hasBreakTrackingForRecords(displayRecords.filter(row => row.rede === item.rede)))
+    .map(item => (appState.filters.semana === 'Todas' && appState.filters.loja === 'Todas')
+      ? applyOfficialNetworkClosingToSummary(item, alertMonthKey)
+      : item)
+    .filter(item => {
+      const networkConfig = NETWORKS.find(network => network.id === item.rede);
+      if (networkConfig?.hasBreak === false) return false;
+      return Math.abs(Number(item.quebra || 0)) > 0.005;
+    })
     .sort((a, b) => b.percQuebra - a.percQuebra);
   const rankingByStore = aggregateByStore(displayRecords)
     .filter(item => hasBreakTrackingForStore(item.rede, item.loja))
@@ -2403,8 +2443,14 @@ function renderCharts(filtered) {
     options: baseChartOptions({ currencyTicks: true })
   });
 
+  const chartMonthKey = getActiveCompanyMonthKey(monthlyBase);
+  const useOfficialNetworkChart = appState.filters.semana === 'Todas' && appState.filters.loja === 'Todas';
   const networkSummary = aggregateByNetwork(monthlyBase)
-    .filter(item => hasBreakTrackingForRecords(monthlyBase.filter(row => row.rede === item.rede)));
+    .map(item => useOfficialNetworkChart ? applyOfficialNetworkClosingToSummary(item, chartMonthKey) : item)
+    .filter(item => {
+      const networkConfig = NETWORKS.find(network => network.id === item.rede);
+      return networkConfig?.hasBreak !== false && Math.abs(Number(item.quebra || 0)) > 0.005;
+    });
   upsertChart('breakByNetwork', els.breakByNetworkChart, {
     type: 'bar',
     data: {
@@ -2461,7 +2507,9 @@ function renderCharts(filtered) {
     options: baseChartOptions({ percentTicks: true, indexAxis: 'y', legend: false })
   });
 
-  const distribution = aggregateByNetwork(monthlyBase).filter(item => item.venda > 0);
+  const distribution = aggregateByNetwork(monthlyBase)
+    .map(item => useOfficialNetworkChart ? applyOfficialNetworkClosingToSummary(item, chartMonthKey) : item)
+    .filter(item => item.venda > 0);
   upsertChart('networkDistribution', els.networkDistributionChart, {
     type: 'doughnut',
     data: {
@@ -2704,6 +2752,43 @@ function getBreakDisplayForStore(network, store, percent = 0, sale = 0) {
   };
 }
 
+function getOfficialNetworkMonthlyClosing(monthKey, network) {
+  const closing = OFFICIAL_NETWORK_MONTHLY_CLOSINGS?.[monthKey]?.[network];
+  if (!closing) return null;
+  return {
+    ...closing,
+    percentualQuebra: closing.venda > 0 ? Number(((closing.quebra / closing.venda) * 100).toFixed(2)) : 0
+  };
+}
+
+function applyOfficialNetworkClosingToSummary(summary, monthKey) {
+  if (!summary) return summary;
+  const official = getOfficialNetworkMonthlyClosing(monthKey, summary.rede);
+  if (!official) return summary;
+  return {
+    ...summary,
+    venda: official.venda,
+    quebra: official.quebra,
+    quebraOperacional: official.quebra,
+    falta: official.falta,
+    qualidade: official.qualidade,
+    estoque: official.estoque,
+    percQuebra: official.percentualQuebra,
+    percQuebraOperacional: official.percentualQuebra,
+    isOfficialClosing: true
+  };
+}
+
+function getOfficialClosingForCurrentScope(records = []) {
+  if (appState.filters.loja !== 'Todas' || appState.filters.semana !== 'Todas') return null;
+  const monthKey = getActiveCompanyMonthKey(records);
+  if (!monthKey) return null;
+  if (appState.filters.rede !== 'Todas') {
+    return getOfficialNetworkMonthlyClosing(monthKey, appState.filters.rede);
+  }
+  return getOfficialCompanyMonthlyClosing(monthKey);
+}
+
 function getOfficialCompanyMonthlyClosing(monthKey) {
   const closing = OFFICIAL_COMPANY_MONTHLY_CLOSINGS[monthKey];
   if (!closing) return null;
@@ -2804,6 +2889,21 @@ function getNetworkMonthlyHistory(network) {
     .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
 
   return monthKeys.map(monthKey => {
+    const official = getOfficialNetworkMonthlyClosing(monthKey, network);
+    if (official) {
+      const networkConfig = NETWORKS.find(item => item.id === network);
+      const hasBreak = networkConfig?.hasBreak !== false && Math.abs(Number(official.quebra || 0)) > 0.005;
+      return {
+        monthKey,
+        monthLabel: formatMonthFilterLabel(monthKey),
+        venda: official.venda,
+        quebra: official.quebra,
+        percentualQuebra: hasBreak ? official.percentualQuebra : null,
+        hasBreak,
+        isOfficialClosing: true
+      };
+    }
+
     const records = getMonthlyAnalysisBase(monthKey, network);
     const totals = aggregateRecords(records);
     const hasBreak = hasBreakTrackingForRecords(records);
@@ -2911,7 +3011,8 @@ function renderMonthlyNetworks(monthKey) {
 
   let networkBase = getMonthlyAnalysisBase(monthKey);
   if (appState.filters.rede !== 'Todas') networkBase = networkBase.filter(item => item.rede === appState.filters.rede);
-  const summaries = aggregateByNetwork(networkBase);
+  const summaries = aggregateByNetwork(networkBase)
+    .map(item => applyOfficialNetworkClosingToSummary(item, monthKey));
   const storeBase = getMonthlyStoreBase(monthKey);
   const ordered = summaries.sort((a, b) => {
     const ai = NETWORKS.findIndex(item => item.id === a.rede);
