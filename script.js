@@ -90,6 +90,8 @@ const appState = {
   config: {
     metaGeral: 1000000,
     metasPorRede: {},
+    monthlyNetworkGoals: {},
+    networkCatalog: [],
     ultimaAtualizacao: null,
     ultimaImportacao: null
   },
@@ -102,7 +104,8 @@ const appState = {
   detailsRede: 'Todas',
   rankingRede: 'Todas',
   detailsExpanded: false,
-  admTab: 'metas',
+  admTab: 'overview',
+  admSidebarOpen: false,
   drawerOpen: false,
   isAdmAuthenticated: false,
   customSelects: {},
@@ -133,7 +136,10 @@ document.addEventListener('DOMContentLoaded', init);
 
 function serializeMetaKeysForFirebase(source = {}) {
   return Object.fromEntries(
-    Object.entries(source || {}).map(([key, value]) => [FIREBASE_META_KEY_MAP[key] || key, value])
+    Object.entries(source || {}).map(([key, value]) => {
+      const legacySafe = FIREBASE_META_KEY_MAP[key];
+      return [legacySafe || encodeURIComponent(key).replace(/\./g, '%2E'), value];
+    })
   );
 }
 
@@ -142,7 +148,10 @@ function deserializeMetaKeysFromFirebase(source = {}) {
     Object.entries(FIREBASE_META_KEY_MAP).map(([original, safe]) => [safe, original])
   );
   return Object.fromEntries(
-    Object.entries(source || {}).map(([key, value]) => [reverseMap[key] || key, value])
+    Object.entries(source || {}).map(([key, value]) => {
+      if (reverseMap[key]) return [reverseMap[key], value];
+      try { return [decodeURIComponent(key), value]; } catch { return [key, value]; }
+    })
   );
 }
 
@@ -186,6 +195,8 @@ function getStateHash(snapshot) {
 
 function applyPersistedState(saved) {
   appState.config.metasPorRede = defaultMetasPorRede();
+  appState.config.monthlyNetworkGoals = {};
+  appState.config.networkCatalog = defaultNetworkCatalog();
 
   if (saved) {
     appState.data = Array.isArray(saved.data) ? saved.data : [];
@@ -197,10 +208,13 @@ function applyPersistedState(saved) {
     appState.storeImports = Array.isArray(saved.storeImports)
       ? saved.storeImports.sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0))
       : [];
+    const savedConfig = saved.config || {};
     appState.config = {
       ...appState.config,
-      ...(saved.config || {}),
-      metasPorRede: { ...defaultMetasPorRede(), ...deserializeMetaKeysFromFirebase(saved.config?.metasPorRede || {}) }
+      ...savedConfig,
+      metasPorRede: { ...defaultMetasPorRede(), ...deserializeMetaKeysFromFirebase(savedConfig.metasPorRede || {}) },
+      monthlyNetworkGoals: normalizeMonthlyNetworkGoals(savedConfig.monthlyNetworkGoals || {}),
+      networkCatalog: normalizeNetworkCatalog(savedConfig.networkCatalog || [])
     };
   } else {
     appState.data = [];
@@ -211,6 +225,8 @@ function applyPersistedState(saved) {
     appState.config = {
       ...appState.config,
       metasPorRede: defaultMetasPorRede(),
+      monthlyNetworkGoals: {},
+      networkCatalog: defaultNetworkCatalog(),
       ultimaAtualizacao: null,
       ultimaImportacao: null
     };
@@ -231,6 +247,7 @@ function applyPersistedState(saved) {
   appState.monthlyData = appState.monthlyData.map(normalizeStoredStoreRecord);
   appState.imports = appState.imports.map(normalizeStoredImport);
   appState.storeImports = appState.storeImports.map(normalizeStoredImport);
+  syncNetworkCatalogFromData();
   appState.config.metaGeral = calculateMetaGeralFromNetworks(appState.config.metasPorRede);
 }
 
@@ -284,10 +301,15 @@ function subscribeRemoteState() {
     persistLocal({ skipRemote: true });
 
     syncLojaOptions();
+    syncMesOptions();
     syncSemanaOptions();
     buildMetaInputs();
+    buildMonthlyGoalInputs();
+    renderNetworkManagement();
+    renderAdminOverview();
     refreshAll();
     renderImportBatchesTable();
+    renderStoreImportBatchesTable();
     renderAdminTable();
   });
 }
@@ -434,6 +456,12 @@ function inferRecordMonthKey(record) {
 function normalizeNetworkName(value) {
   const normalized = normalizeText(value || '').replace(/[^a-z0-9]+/g, ' ').trim();
   if (!normalized) return '';
+  const catalogMatch = (appState?.config?.networkCatalog || []).find(item => {
+    const idKey = normalizeText(item?.id || '').replace(/[^a-z0-9]+/g, ' ').trim();
+    const labelKey = normalizeText(item?.label || '').replace(/[^a-z0-9]+/g, ' ').trim();
+    return idKey === normalized || labelKey === normalized;
+  });
+  if (catalogMatch) return catalogMatch.id;
   if (normalized.includes('dia a dia')) return 'ATACADÃO DIA A DIA';
   if (normalized.includes('comper') || normalized.includes('fort')) return 'COMPER/FORT';
   if (normalized.includes('vivendas')) return 'VIVENDAS';
@@ -664,6 +692,21 @@ function cacheElements() {
     authFeedback: document.getElementById('authFeedback'),
     admModal: document.getElementById('admModal'),
     closeAdmModalBtn: document.getElementById('closeAdmModalBtn'),
+    admShell: document.getElementById('admShell'),
+    admSidebarToggleBtn: document.getElementById('admSidebarToggleBtn'),
+    admSidebarBackdrop: document.getElementById('admSidebarBackdrop'),
+    admSectionTitle: document.getElementById('admSectionTitle'),
+    adminOverviewCards: document.getElementById('adminOverviewCards'),
+    monthlyGoalMonthInput: document.getElementById('monthlyGoalMonthInput'),
+    monthlyGoalTotalInput: document.getElementById('monthlyGoalTotalInput'),
+    monthlyGoalsForm: document.getElementById('monthlyGoalsForm'),
+    saveMonthlyGoalsBtn: document.getElementById('saveMonthlyGoalsBtn'),
+    monthlyGoalsFeedback: document.getElementById('monthlyGoalsFeedback'),
+    newNetworkNameInput: document.getElementById('newNetworkNameInput'),
+    newNetworkBreakInput: document.getElementById('newNetworkBreakInput'),
+    addNetworkBtn: document.getElementById('addNetworkBtn'),
+    networkManagementFeedback: document.getElementById('networkManagementFeedback'),
+    networkManagementBody: document.getElementById('networkManagementBody'),
     metaGeralInput: document.getElementById('metaGeralInput'),
     metasRedeForm: document.getElementById('metasRedeForm'),
     saveGoalsBtn: document.getElementById('saveGoalsBtn'),
@@ -770,6 +813,134 @@ async function seedInitialState() {
   }
 }
 
+function defaultNetworkCatalog() {
+  return NETWORKS.map((network, index) => ({
+    id: network.id,
+    label: network.label,
+    hasBreak: network.hasBreak !== false,
+    active: true,
+    order: index
+  }));
+}
+
+function normalizeNetworkCatalog(source = []) {
+  const base = defaultNetworkCatalog();
+  const map = new Map(base.map(item => [item.id, { ...item }]));
+  (Array.isArray(source) ? source : []).forEach((item, index) => {
+    if (!item || !String(item.id || item.label || '').trim()) return;
+    const id = String(item.id || item.label).replace(/\s+/g, ' ').trim().toUpperCase();
+    const previous = map.get(id) || {};
+    map.set(id, {
+      id,
+      label: String(item.label || id).replace(/\s+/g, ' ').trim(),
+      hasBreak: item.hasBreak !== false,
+      active: item.active !== false,
+      order: Number.isFinite(Number(item.order)) ? Number(item.order) : (previous.order ?? base.length + index)
+    });
+  });
+  return [...map.values()].sort((a, b) => Number(a.order || 0) - Number(b.order || 0) || a.label.localeCompare(b.label, 'pt-BR'));
+}
+
+function normalizeMonthlyNetworkGoals(source = {}) {
+  const result = {};
+  Object.entries(source || {}).forEach(([monthKey, entries]) => {
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) return;
+    const normalized = [];
+    if (Array.isArray(entries)) {
+      entries.forEach(entry => {
+        if (!entry || !String(entry.networkId || '').trim()) return;
+        normalized.push({ networkId: String(entry.networkId).trim(), value: Number(entry.value || 0) });
+      });
+    } else if (entries && typeof entries === 'object') {
+      Object.entries(entries).forEach(([networkId, value]) => normalized.push({ networkId, value: Number(value || 0) }));
+    }
+    result[monthKey] = normalized;
+  });
+  return result;
+}
+
+function getNetworkCatalog({ includeInactive = false } = {}) {
+  const catalog = normalizeNetworkCatalog(appState.config.networkCatalog || []);
+  return includeInactive ? catalog : catalog.filter(item => item.active !== false);
+}
+
+function getNetworkConfig(networkId) {
+  return getNetworkCatalog({ includeInactive: true }).find(item => item.id === networkId) || null;
+}
+
+function isNetworkActive(networkId) {
+  const config = getNetworkConfig(networkId);
+  return config ? config.active !== false : true;
+}
+
+function syncNetworkCatalogFromData() {
+  const current = normalizeNetworkCatalog(appState.config.networkCatalog || []);
+  const map = new Map(current.map(item => [item.id, item]));
+  const allRecords = [...(appState.data || []), ...(appState.storeData || []), ...(appState.monthlyData || [])];
+  allRecords.forEach(record => {
+    const id = String(record?.rede || '').trim();
+    if (!id || map.has(id)) return;
+    map.set(id, {
+      id,
+      label: id,
+      hasBreak: Math.abs(Number(record?.valorQuebra || record?.valorQuebraOperacional || 0)) > 0.005,
+      active: true,
+      order: map.size
+    });
+    if (!(id in appState.config.metasPorRede)) appState.config.metasPorRede[id] = 0;
+  });
+  appState.config.networkCatalog = [...map.values()].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+}
+
+function getMonthlyGoalEntries(monthKey) {
+  return Array.isArray(appState.config.monthlyNetworkGoals?.[monthKey])
+    ? appState.config.monthlyNetworkGoals[monthKey]
+    : [];
+}
+
+function getMonthlyNetworkMeta(monthKey, networkId) {
+  const entry = getMonthlyGoalEntries(monthKey).find(item => item.networkId === networkId);
+  if (entry) return Number(entry.value || 0);
+  return Number(appState.config.metasPorRede?.[networkId] || 0);
+}
+
+function setMonthlyNetworkMeta(monthKey, networkId, value) {
+  if (!appState.config.monthlyNetworkGoals || typeof appState.config.monthlyNetworkGoals !== 'object') appState.config.monthlyNetworkGoals = {};
+  const entries = [...getMonthlyGoalEntries(monthKey)];
+  const index = entries.findIndex(item => item.networkId === networkId);
+  const next = { networkId, value: Number(value || 0) };
+  if (index >= 0) entries[index] = next;
+  else entries.push(next);
+  appState.config.monthlyNetworkGoals[monthKey] = entries;
+}
+
+function getMonthlyCompanyMeta(monthKey) {
+  return getNetworkCatalog().reduce((total, network) => total + getMonthlyNetworkMeta(monthKey, network.id), 0);
+}
+
+function getActiveMetaMonthKey(records = []) {
+  if (appState.filters.mes !== 'Todas') return appState.filters.mes;
+  const fromRecords = (records || [])
+    .map(item => item?.monthKey || inferRecordMonthKey(item || {}))
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a, 'pt-BR', { numeric: true }))[0];
+  return fromRecords || getLatestImportMonthKey() || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getWeekDivisorForMonth(monthKey) {
+  const weeks = new Set([...appState.data, ...appState.storeData]
+    .filter(item => (item.monthKey || inferRecordMonthKey(item)) === monthKey && isNetworkActive(item.rede))
+    .map(item => String(item.semana || '').trim())
+    .filter(Boolean));
+  return weeks.size >= 5 ? 5 : 4;
+}
+
+function resolveNetworkMetaForView(networkId, monthKey = '', weekly = appState.filters.semana !== 'Todas') {
+  const resolvedMonth = monthKey || getActiveMetaMonthKey();
+  const monthlyMeta = getMonthlyNetworkMeta(resolvedMonth, networkId);
+  return weekly ? monthlyMeta / getWeekDivisorForMonth(resolvedMonth) : monthlyMeta;
+}
+
 function defaultMetasPorRede() {
   return {
     'ATACADÃO DIA A DIA': 180000,
@@ -786,7 +957,7 @@ function defaultMetasPorRede() {
 }
 
 function calculateMetaGeralFromNetworks(source = appState.config.metasPorRede) {
-  return NETWORKS.reduce((total, network) => total + Number(source?.[network.id] || 0), 0);
+  return getNetworkCatalog().reduce((total, network) => total + Number(source?.[network.id] || 0), 0);
 }
 
 function syncMetaGeralInputFromNetworkInputs({ updateState = false } = {}) {
@@ -852,13 +1023,14 @@ function generateSampleData() {
 }
 
 function buildMetaInputs() {
+  if (!els.metaGeralInput || !els.metasRedeForm) return;
   els.metaGeralInput.dataset.currency = 'true';
   els.metaGeralInput.readOnly = true;
-  els.metaGeralInput.title = 'Calculada automaticamente pela soma das metas por rede';
-  els.metasRedeForm.innerHTML = NETWORKS.map(network => `
+  els.metaGeralInput.title = 'Calculada automaticamente pela soma das metas padrão das redes ativas';
+  els.metasRedeForm.innerHTML = getNetworkCatalog().map(network => `
     <div class="field">
-      <label for="meta-${slugify(network.id)}">Meta ${network.label}</label>
-      <input id="meta-${slugify(network.id)}" data-network="${network.id}" data-currency="true" type="text" inputmode="decimal" autocomplete="off" placeholder="R$ 0,00" />
+      <label for="meta-${slugify(network.id)}">${escapeHtml(network.label)}</label>
+      <input id="meta-${slugify(network.id)}" data-network="${escapeHtml(network.id)}" data-currency="true" type="text" inputmode="decimal" autocomplete="off" placeholder="R$ 0,00" />
     </div>
   `).join('');
 
@@ -874,8 +1046,173 @@ function buildMetaInputs() {
   });
 }
 
+function getMonthlyGoalEditorMonth() {
+  const current = String(els.monthlyGoalMonthInput?.value || '').trim();
+  if (/^\d{4}-\d{2}$/.test(current)) return current;
+  return getActiveMetaMonthKey();
+}
+
+function syncMonthlyGoalTotalFromInputs() {
+  if (!els.monthlyGoalsForm || !els.monthlyGoalTotalInput) return 0;
+  const total = [...els.monthlyGoalsForm.querySelectorAll('input[data-monthly-network]')]
+    .reduce((sum, input) => sum + parseCurrencyInput(input.value), 0);
+  setCurrencyInputValue(els.monthlyGoalTotalInput, total);
+  return total;
+}
+
+function buildMonthlyGoalInputs() {
+  if (!els.monthlyGoalMonthInput || !els.monthlyGoalsForm) return;
+  const monthKey = getMonthlyGoalEditorMonth();
+  els.monthlyGoalMonthInput.value = monthKey;
+  els.monthlyGoalsForm.innerHTML = getNetworkCatalog().map(network => `
+    <div class="field monthly-goal-field">
+      <label for="meta-month-${slugify(monthKey)}-${slugify(network.id)}">${escapeHtml(network.label)}</label>
+      <input id="meta-month-${slugify(monthKey)}-${slugify(network.id)}" data-monthly-network="${escapeHtml(network.id)}" data-currency="true" type="text" inputmode="decimal" autocomplete="off" placeholder="R$ 0,00" />
+    </div>
+  `).join('');
+
+  [...els.monthlyGoalsForm.querySelectorAll('input[data-monthly-network]')].forEach(input => {
+    setCurrencyInputValue(input, getMonthlyNetworkMeta(monthKey, input.dataset.monthlyNetwork));
+    attachCurrencyMask(input);
+    input.addEventListener('focus', () => input.select());
+    input.addEventListener('input', syncMonthlyGoalTotalFromInputs);
+    input.addEventListener('blur', syncMonthlyGoalTotalFromInputs);
+  });
+  syncMonthlyGoalTotalFromInputs();
+  if (els.monthlyGoalsFeedback) {
+    els.monthlyGoalsFeedback.textContent = '';
+    els.monthlyGoalsFeedback.className = 'feedback';
+  }
+}
+
+function saveMonthlyGoals() {
+  if (!els.monthlyGoalsForm) return;
+  const monthKey = getMonthlyGoalEditorMonth();
+  [...els.monthlyGoalsForm.querySelectorAll('input[data-monthly-network]')].forEach(input => {
+    const value = parseCurrencyInput(input.value);
+    setMonthlyNetworkMeta(monthKey, input.dataset.monthlyNetwork, value);
+    setCurrencyInputValue(input, value);
+  });
+  appState.config.ultimaAtualizacao = new Date().toISOString();
+  persistLocal();
+  syncMonthlyGoalTotalFromInputs();
+  refreshAll();
+  renderAdminOverview();
+  if (els.monthlyGoalsFeedback) {
+    els.monthlyGoalsFeedback.textContent = `Metas de ${formatMonthFilterLabel(monthKey)} salvas.`;
+    els.monthlyGoalsFeedback.className = 'feedback is-success';
+  }
+}
+
+function renderNetworkManagement() {
+  if (!els.networkManagementBody) return;
+  const catalog = getNetworkCatalog({ includeInactive: true });
+  els.networkManagementBody.innerHTML = catalog.map(network => {
+    const key = encodeURIComponent(network.id);
+    return `<tr class="${network.active === false ? 'network-row--inactive' : ''}">
+      <td><strong>${escapeHtml(network.label)}</strong><small class="network-id-note">${escapeHtml(network.id)}</small></td>
+      <td><span class="status-badge ${network.active === false ? 'status--neutral' : 'status--good'}">${network.active === false ? 'Inativa' : 'Ativa'}</span></td>
+      <td><select class="network-break-select" data-network-break="${key}"><option value="true" ${network.hasBreak !== false ? 'selected' : ''}>Venda + Quebra</option><option value="false" ${network.hasBreak === false ? 'selected' : ''}>Somente Venda</option></select></td>
+      <td><button type="button" class="btn ${network.active === false ? 'btn--primary' : 'btn--ghost'} btn--sm" data-network-toggle="${key}">${network.active === false ? 'Ativar' : 'Inativar'}</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function addNetworkFromAdmin() {
+  const label = String(els.newNetworkNameInput?.value || '').replace(/\s+/g, ' ').trim();
+  if (!label) return setNetworkManagementFeedback('Digite o nome da nova rede.', true);
+  const id = label.toUpperCase();
+  const exists = getNetworkCatalog({ includeInactive: true }).some(item => normalizeText(item.id) === normalizeText(id) || normalizeText(item.label) === normalizeText(label));
+  if (exists) return setNetworkManagementFeedback('Essa rede já está cadastrada.', true);
+  const catalog = getNetworkCatalog({ includeInactive: true });
+  catalog.push({
+    id,
+    label,
+    hasBreak: String(els.newNetworkBreakInput?.value || 'true') !== 'false',
+    active: true,
+    order: catalog.length
+  });
+  appState.config.networkCatalog = catalog;
+  appState.config.metasPorRede[id] = Number(appState.config.metasPorRede[id] || 0);
+  appState.config.ultimaAtualizacao = new Date().toISOString();
+  if (els.newNetworkNameInput) els.newNetworkNameInput.value = '';
+  persistLocal();
+  buildMetaInputs();
+  buildMonthlyGoalInputs();
+  renderNetworkManagement();
+  initCustomSelects();
+  refreshAll();
+  renderAdminOverview();
+  setNetworkManagementFeedback(`${label} adicionada ao painel.`, false);
+}
+
+function setNetworkManagementFeedback(message, isError = false) {
+  if (!els.networkManagementFeedback) return;
+  els.networkManagementFeedback.textContent = message;
+  els.networkManagementFeedback.className = `feedback ${isError ? 'is-error' : 'is-success'}`;
+}
+
+function handleNetworkManagementClick(event) {
+  const button = event.target.closest('[data-network-toggle]');
+  if (!button) return;
+  const id = decodeURIComponent(button.dataset.networkToggle || '');
+  const catalog = getNetworkCatalog({ includeInactive: true });
+  const item = catalog.find(network => network.id === id);
+  if (!item) return;
+  item.active = item.active === false;
+  appState.config.networkCatalog = catalog;
+  if (!item.active && appState.filters.rede === id) {
+    appState.filters.rede = 'Todas';
+    appState.filters.loja = 'Todas';
+    appState.detailsRede = 'Todas';
+    appState.rankingRede = 'Todas';
+    appState.monthlyDrilldown = { network: '', store: '' };
+  }
+  appState.config.metaGeral = calculateMetaGeralFromNetworks(appState.config.metasPorRede);
+  appState.config.ultimaAtualizacao = new Date().toISOString();
+  persistLocal();
+  buildMetaInputs();
+  buildMonthlyGoalInputs();
+  renderNetworkManagement();
+  initCustomSelects();
+  refreshAll();
+  renderAdminOverview();
+}
+
+function handleNetworkManagementChange(event) {
+  const select = event.target.closest('[data-network-break]');
+  if (!select) return;
+  const id = decodeURIComponent(select.dataset.networkBreak || '');
+  const catalog = getNetworkCatalog({ includeInactive: true });
+  const item = catalog.find(network => network.id === id);
+  if (!item) return;
+  item.hasBreak = select.value !== 'false';
+  appState.config.networkCatalog = catalog;
+  appState.config.ultimaAtualizacao = new Date().toISOString();
+  persistLocal();
+  refreshAll();
+  renderAdminOverview();
+}
+
+function renderAdminOverview() {
+  if (!els.adminOverviewCards) return;
+  const all = getNetworkCatalog({ includeInactive: true });
+  const active = all.filter(item => item.active !== false);
+  const monthKey = getActiveMetaMonthKey();
+  const monthMeta = getMonthlyCompanyMeta(monthKey);
+  els.adminOverviewCards.innerHTML = `
+    <article class="adm-overview-card"><span>Redes ativas</span><strong>${active.length}</strong><small>${all.length - active.length} inativa(s)</small></article>
+    <article class="adm-overview-card"><span>Meta de ${escapeHtml(formatMonthFilterLabel(monthKey))}</span><strong>${formatCurrency(monthMeta)}</strong><small>Soma das redes ativas</small></article>
+    <article class="adm-overview-card"><span>Última importação</span><strong>${formatDateTime(appState.config.ultimaImportacao)}</strong><small>${appState.imports.length + appState.storeImports.length} lote(s) registrados</small></article>`;
+}
+
 function initCustomSelects() {
-  createCustomSelect('filterRede', [{ value: 'Todas', label: 'Todas' }, ...NETWORKS.map(n => ({ value: n.id, label: n.label }))], appState.filters.rede);
+  const activeNetworkIds = new Set(getNetworkCatalog().map(item => item.id));
+  if (appState.filters.rede !== 'Todas' && !activeNetworkIds.has(appState.filters.rede)) {
+    appState.filters.rede = 'Todas';
+    appState.filters.loja = 'Todas';
+  }
+  createCustomSelect('filterRede', [{ value: 'Todas', label: 'Todas' }, ...getNetworkCatalog().map(n => ({ value: n.id, label: n.label }))], appState.filters.rede);
   syncLojaOptions();
   syncMesOptions();
   syncSemanaOptions();
@@ -937,7 +1274,9 @@ function createCustomSelect(id, options, selectedValue) {
 }
 
 function syncLojaOptions() {
-  let dataForStores = [...appState.data.filter(item => !item.isNetworkTotalOnly), ...appState.storeData, ...appState.monthlyData];
+  const activeNetworks = new Set(getNetworkCatalog().map(item => item.id));
+  let dataForStores = [...appState.data.filter(item => !item.isNetworkTotalOnly), ...appState.storeData, ...appState.monthlyData]
+    .filter(item => activeNetworks.has(item.rede));
   if (appState.filters.rede !== 'Todas') dataForStores = dataForStores.filter(item => item.rede === appState.filters.rede);
   if (appState.filters.mes !== 'Todas') dataForStores = dataForStores.filter(item => (item.monthKey || inferRecordMonthKey(item)) === appState.filters.mes);
   const stores = [...new Set(dataForStores.map(item => item.loja))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -993,6 +1332,19 @@ function bindEvents() {
   if (els.toggleDetailsBtn) els.toggleDetailsBtn.addEventListener('click', toggleDetailsSection);
   if (els.closeAdmModalBtn) els.closeAdmModalBtn.addEventListener('click', closeAdmModal);
   if (els.saveGoalsBtn) els.saveGoalsBtn.addEventListener('click', saveGoals);
+  if (els.saveMonthlyGoalsBtn) els.saveMonthlyGoalsBtn.addEventListener('click', saveMonthlyGoals);
+  if (els.monthlyGoalMonthInput) els.monthlyGoalMonthInput.addEventListener('change', buildMonthlyGoalInputs);
+  if (els.addNetworkBtn) els.addNetworkBtn.addEventListener('click', addNetworkFromAdmin);
+  if (els.networkManagementBody) {
+    els.networkManagementBody.addEventListener('click', handleNetworkManagementClick);
+    els.networkManagementBody.addEventListener('change', handleNetworkManagementChange);
+  }
+  if (els.admSidebarToggleBtn) els.admSidebarToggleBtn.addEventListener('click', () => setAdmSidebar(!appState.admSidebarOpen));
+  if (els.admSidebarBackdrop) els.admSidebarBackdrop.addEventListener('click', () => setAdmSidebar(false));
+  if (els.admModal) els.admModal.addEventListener('click', event => {
+    const jump = event.target.closest('[data-adm-jump]');
+    if (jump) setAdmTab(jump.dataset.admJump);
+  });
   if (els.importExcelBtn) els.importExcelBtn.addEventListener('click', importExcelFile);
   if (els.importStoreExcelBtn) els.importStoreExcelBtn.addEventListener('click', importStoreExcelFile);
   if (els.importBatchesTableBody) els.importBatchesTableBody.addEventListener('click', handleImportBatchAction);
@@ -1046,26 +1398,53 @@ function openAuthModal() {
 }
 function closeAuthModal() { els.authModal.hidden = true; }
 
+function setAdmSidebar(open) {
+  appState.admSidebarOpen = Boolean(open);
+  if (els.admShell) els.admShell.classList.toggle('adm-sidebar-open', appState.admSidebarOpen);
+  if (els.admSidebarBackdrop) els.admSidebarBackdrop.hidden = !appState.admSidebarOpen;
+}
+
 function setAdmTab(tab) {
-  appState.admTab = tab || 'metas';
+  appState.admTab = tab || 'overview';
   if (!els.admNavItems?.length || !els.admPanels?.length) return;
+  const titles = {
+    overview: 'Visão Geral',
+    'metas-mensais': 'Metas Mensais',
+    redes: 'Gestão de Redes',
+    'import-rede': 'Importação por Rede',
+    'import-loja': 'Importação por Loja',
+    historico: 'Histórico',
+    registros: 'Registros'
+  };
   els.admNavItems.forEach(button => button.classList.toggle('is-active', button.dataset.admTab === appState.admTab));
   els.admPanels.forEach(panel => {
     const active = panel.dataset.admPanel === appState.admTab;
     panel.hidden = !active;
     panel.classList.toggle('is-active', active);
   });
+  if (els.admSectionTitle) els.admSectionTitle.textContent = titles[appState.admTab] || 'Administração';
+  if (window.matchMedia?.('(max-width: 820px)').matches) setAdmSidebar(false);
+  if (appState.admTab === 'overview') renderAdminOverview();
+  if (appState.admTab === 'metas-mensais') buildMonthlyGoalInputs();
+  if (appState.admTab === 'redes') renderNetworkManagement();
 }
 
 function openAdmModal() {
   buildMetaInputs();
+  buildMonthlyGoalInputs();
+  renderNetworkManagement();
+  renderAdminOverview();
   renderImportBatchesTable();
   renderStoreImportBatchesTable();
   renderAdminTable();
-  setAdmTab(appState.admTab || 'metas');
+  setAdmSidebar(false);
+  setAdmTab(appState.admTab || 'overview');
   els.admModal.hidden = false;
 }
-function closeAdmModal() { els.admModal.hidden = true; }
+function closeAdmModal() {
+  setAdmSidebar(false);
+  els.admModal.hidden = true;
+}
 
 function handleAuthSubmit(event) {
   event.preventDefault();
@@ -1091,6 +1470,8 @@ function saveGoals() {
   setCurrencyInputValue(els.metaGeralInput, appState.config.metaGeral);
   appState.config.ultimaAtualizacao = new Date().toISOString();
   persistLocal();
+  buildMonthlyGoalInputs();
+  renderAdminOverview();
   refreshAll();
 }
 
@@ -1185,6 +1566,7 @@ function importExcelFile() {
 
       appState.data = [...appState.data, ...parsed.records];
       appState.imports = [parsed.batch, ...appState.imports].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+      syncNetworkCatalogFromData();
       applyValidatedHistoricalClosings();
       appState.config.ultimaImportacao = parsed.batch.importedAt;
       appState.config.ultimaAtualizacao = new Date().toISOString();
@@ -1249,6 +1631,7 @@ function importStoreExcelFile() {
 
       appState.storeData = [...appState.storeData, ...parsed.records].map(normalizeStoredStoreRecord);
       appState.storeImports = [parsed.batch, ...appState.storeImports].sort((a, b) => new Date(b.importedAt || 0) - new Date(a.importedAt || 0));
+      syncNetworkCatalogFromData();
       appState.config.ultimaAtualizacao = new Date().toISOString();
       appState.monthlyDrilldown = { network: '', store: '' };
       persistLocal();
@@ -1323,6 +1706,13 @@ function parseStoreWorkbook(workbook, fileName, periodInfo = {}) {
 
 function inferStoreDetailNetwork(sheetName, rows = []) {
   const normalized = normalizeText(sheetName);
+  const normalizedWithoutPrefix = normalized.replace(/^rede\s+/, '').trim();
+  const exactDynamic = getNetworkCatalog({ includeInactive: true }).find(item => {
+    const id = normalizeText(item.id);
+    const label = normalizeText(item.label);
+    return id === normalized || label === normalized || id === normalizedWithoutPrefix || label === normalizedWithoutPrefix;
+  });
+  if (exactDynamic) return exactDynamic.id;
   if (normalized.includes('dia a dia')) return 'ATACADÃO DIA A DIA';
   if (normalized.includes('costa')) return 'COSTA';
   if (normalized.includes('g.p') || normalized.includes('g p') || normalized.includes('comper') || normalized.includes('fort')) return 'COMPER/FORT';
@@ -1338,7 +1728,8 @@ function inferStoreDetailNetwork(sheetName, rows = []) {
   // essas unidades pertencem à rede CONSIGNADOS.
   const labels = (rows || []).slice(0, 8).map(row => normalizeText(getRowLabel(row))).join(' | ');
   if (labels.includes('economart') || labels.includes('cerramix')) return 'CONSIGNADOS';
-  return '';
+  const dynamic = getNetworkCatalog({ includeInactive: true }).find(item => normalized.includes(normalizeText(item.id)) || normalized.includes(normalizeText(item.label)));
+  return dynamic?.id || '';
 }
 
 function parseStoreDetailSheet({ network, sheetName, rows, batchId, fileName, importedAt, weekLabel, monthLabel, monthKey, periodLabel }) {
@@ -1671,6 +2062,13 @@ function getFlexibleCell(row, tokenGroups) {
 
 function inferNetworkBySheetName(sheetName) {
   const normalized = normalizeText(sheetName);
+  const normalizedWithoutPrefix = normalized.replace(/^rede\s+/, '').trim();
+  const exactDynamic = getNetworkCatalog({ includeInactive: true }).find(item => {
+    const id = normalizeText(item.id);
+    const label = normalizeText(item.label);
+    return id === normalized || label === normalized || id === normalizedWithoutPrefix || label === normalizedWithoutPrefix;
+  });
+  if (exactDynamic) return exactDynamic.id;
   if (normalized.includes('dia a dia')) return 'ATACADÃO DIA A DIA';
   if (normalized.includes('comper') || normalized.includes('fort')) return 'COMPER/FORT';
   if (normalized.includes('costa')) return 'COSTA';
@@ -1680,11 +2078,20 @@ function inferNetworkBySheetName(sheetName) {
   if (normalized.includes('assa')) return 'ASSAÍ';
   if (normalized.includes('vivendas')) return 'VIVENDAS';
   if (normalized.includes('west')) return 'WEST CARNES';
-  return '';
+  const dynamic = getNetworkCatalog({ includeInactive: true }).find(item => normalized.includes(normalizeText(item.id)) || normalized.includes(normalizeText(item.label)));
+  return dynamic?.id || '';
 }
 
 function detectWorksheetModel(sheetName, row) {
   const normalized = normalizeText(sheetName);
+  const normalizedWithoutPrefix = normalized.replace(/^rede\s+/, '').trim();
+  const dynamicExact = getNetworkCatalog({ includeInactive: true }).find(item => {
+    const id = normalizeText(item.id);
+    const label = normalizeText(item.label);
+    return id === normalized || label === normalized || id === normalizedWithoutPrefix || label === normalizedWithoutPrefix;
+  });
+  const isBuiltIn = dynamicExact && NETWORKS.some(item => item.id === dynamicExact.id);
+  if (dynamicExact && !isBuiltIn) return 'GENERICO';
   if (normalized.includes('dia a dia')) return 'DIA_A_DIA';
   if (normalized.includes('comper') || normalized.includes('fort')) return 'PEREIRA';
   if (normalized.includes('vivendas')) return 'VIVENDAS';
@@ -1813,7 +2220,9 @@ function inferNetworkByStore(store) {
     ['NOSSA KAZA', ['nossa kaza', 'nossa casa']], ['WEST CARNES', ['west carnes', 'west']]
   ];
   const match = rules.find(([_, terms]) => terms.some(term => normalized.includes(term)));
-  return match ? match[0] : '';
+  if (match) return match[0];
+  const dynamic = getNetworkCatalog({ includeInactive: true }).find(item => normalized.includes(normalizeText(item.id)) || normalized.includes(normalizeText(item.label)));
+  return dynamic?.id || '';
 }
 
 function setImportFeedback(message, isError) {
@@ -1840,13 +2249,15 @@ function getFilteredData() {
     if (!source.length && appState.storeData.length) source = [...appState.storeData];
   }
 
+  const activeNetworks = new Set(getNetworkCatalog().map(item => item.id));
   return source.filter(item => {
     const monthKey = item.monthKey || inferRecordMonthKey(item);
+    const byActiveNetwork = activeNetworks.has(item.rede);
     const byRede = appState.filters.rede === 'Todas' || item.rede === appState.filters.rede;
     const byLoja = appState.filters.loja === 'Todas' || item.loja === appState.filters.loja;
     const byMes = appState.filters.mes === 'Todas' || monthKey === appState.filters.mes;
     const bySemana = appState.filters.semana === 'Todas' || item.semana === appState.filters.semana;
-    return byRede && byLoja && byMes && bySemana;
+    return byActiveNetwork && byRede && byLoja && byMes && bySemana;
   });
 }
 
@@ -1872,6 +2283,7 @@ function refreshAll() {
   renderImportBatchesTable();
   renderStoreImportBatchesTable();
   renderAdminTable();
+  if (els.admModal && !els.admModal.hidden) renderAdminOverview();
 }
 
 function getLatestImportMonthKey() {
@@ -2132,7 +2544,7 @@ function renderNetworkWinnersPanel(records) {
 
 function renderDetailsNetworkTabs(filtered) {
   const availableNetworks = [...new Set(getDisplayRecords(filtered).map(item => item.rede))];
-  const options = ['Todas', ...NETWORKS.map(n => n.id).filter(id => availableNetworks.includes(id))];
+  const options = ['Todas', ...getNetworkCatalog().map(n => n.id).filter(id => availableNetworks.includes(id))];
   if (!options.includes(appState.detailsRede)) appState.detailsRede = 'Todas';
   els.detailsNetworkTabs.innerHTML = options.map(option => {
     const label = option === 'Todas' ? 'Todas as redes' : option;
@@ -2205,7 +2617,7 @@ function renderSummaryTable(filtered) {
   const monthKey = getActiveCompanyMonthKey(displayRecords);
   const useOfficial = appState.filters.semana === 'Todas' && appState.filters.loja === 'Todas';
   const networks = appState.filters.rede === 'Todas'
-    ? NETWORKS.map(item => item.id)
+    ? getNetworkCatalog().map(item => item.id)
     : [appState.filters.rede];
 
   els.summaryTableBody.innerHTML = networks.map(networkId => {
@@ -2216,7 +2628,7 @@ function renderSummaryTable(filtered) {
       return `<tr>
         <td>${networkId}</td>
         <td>${formatCurrency(0)}</td>
-        <td>${formatCurrency(appState.config.metasPorRede[networkId] || 0)}</td>
+        <td>${formatCurrency(resolveNetworkMetaForView(networkId, monthKey))}</td>
         <td>0%</td>
         <td>—</td>
         <td>—</td>
@@ -2233,9 +2645,9 @@ function renderSummaryTable(filtered) {
       qualidade: official.qualidade,
       estoque: official.estoque
     } : calculated;
-    const meta = appState.config.metasPorRede[networkId] || 0;
+    const meta = resolveNetworkMetaForView(networkId, monthKey);
     const percentMeta = meta > 0 ? (totals.venda / meta) * 100 : 0;
-    const networkConfig = NETWORKS.find(item => item.id === networkId);
+    const networkConfig = getNetworkConfig(networkId);
     const hasBreak = official
       ? networkConfig?.hasBreak !== false && Math.abs(Number(official.quebra || 0)) > 0.005
       : hasBreakTrackingForRecords(records);
@@ -2365,7 +2777,7 @@ function renderAlerts(filtered) {
       ? applyOfficialNetworkClosingToSummary(item, alertMonthKey)
       : item)
     .filter(item => {
-      const networkConfig = NETWORKS.find(network => network.id === item.rede);
+      const networkConfig = getNetworkConfig(item.rede);
       if (networkConfig?.hasBreak === false) return false;
       return Math.abs(Number(item.quebra || 0)) > 0.005;
     })
@@ -2448,7 +2860,7 @@ function renderCharts(filtered) {
   const networkSummary = aggregateByNetwork(monthlyBase)
     .map(item => useOfficialNetworkChart ? applyOfficialNetworkClosingToSummary(item, chartMonthKey) : item)
     .filter(item => {
-      const networkConfig = NETWORKS.find(network => network.id === item.rede);
+      const networkConfig = getNetworkConfig(item.rede);
       return networkConfig?.hasBreak !== false && Math.abs(Number(item.quebra || 0)) > 0.005;
     });
   upsertChart('breakByNetwork', els.breakByNetworkChart, {
@@ -2716,7 +3128,7 @@ function rowHasFlexibleHeader(row, groups) {
 }
 
 function hasBreakTrackingForStore(network, store, monthKey = '', weekLabel = '') {
-  const networkConfig = NETWORKS.find(item => item.id === network);
+  const networkConfig = getNetworkConfig(network);
   if (networkConfig && networkConfig.hasBreak === false) return false;
 
   const resolvedMonth = monthKey
@@ -2738,7 +3150,7 @@ function hasBreakTrackingForStore(network, store, monthKey = '', weekLabel = '')
 function hasBreakTrackingForRecords(records) {
   return (records || []).some(item => {
     if (!item) return false;
-    const networkConfig = NETWORKS.find(network => network.id === item.rede);
+    const networkConfig = getNetworkConfig(item.rede);
     if (networkConfig && networkConfig.hasBreak === false) return false;
     return Math.abs(Number(item.valorQuebra || item.valorQuebraOperacional || 0)) > 0.005;
   });
@@ -2838,9 +3250,19 @@ function getActiveCompanyMonthKey(records = []) {
   return recordMonth || getMonthlySummaryMonthKey() || getLatestImportMonthKey();
 }
 
+function hasDynamicNetworkDataForMonth(monthKey) {
+  const builtIn = new Set(NETWORKS.map(item => item.id));
+  return [...appState.data, ...appState.storeData, ...appState.monthlyData].some(item => {
+    const itemMonth = item?.monthKey || inferRecordMonthKey(item || {});
+    return itemMonth === monthKey && isNetworkActive(item.rede) && !builtIn.has(item.rede);
+  });
+}
+
 function shouldUseOfficialCompanyMonthlyClosing(records = []) {
   if (appState.filters.rede !== 'Todas' || appState.filters.loja !== 'Todas' || appState.filters.semana !== 'Todas') return false;
+  if (getNetworkCatalog({ includeInactive: true }).some(item => item.active === false)) return false;
   const monthKey = getActiveCompanyMonthKey(records);
+  if (monthKey && hasDynamicNetworkDataForMonth(monthKey)) return false;
   return Boolean(monthKey && getOfficialCompanyMonthlyClosing(monthKey));
 }
 
@@ -2852,8 +3274,11 @@ function getCompanyMonthlyHistory() {
       .filter(Boolean)
   ])].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
 
+  const allNetworksActive = !getNetworkCatalog({ includeInactive: true }).some(item => item.active === false);
   return monthKeys.map(monthKey => {
-    const official = getOfficialCompanyMonthlyClosing(monthKey);
+    const official = allNetworksActive && !hasDynamicNetworkDataForMonth(monthKey)
+      ? getOfficialCompanyMonthlyClosing(monthKey)
+      : null;
     if (official) {
       return {
         monthKey,
@@ -2866,7 +3291,8 @@ function getCompanyMonthlyHistory() {
       };
     }
 
-    const records = getMonthlyAnalysisBase(monthKey);
+    const activeIds = new Set(getNetworkCatalog().map(item => item.id));
+    const records = getMonthlyAnalysisBase(monthKey).filter(item => activeIds.has(item.rede));
     const totals = aggregateRecords(records);
     const hasBreak = hasBreakTrackingForRecords(records);
     return {
@@ -2891,7 +3317,7 @@ function getNetworkMonthlyHistory(network) {
   return monthKeys.map(monthKey => {
     const official = getOfficialNetworkMonthlyClosing(monthKey, network);
     if (official) {
-      const networkConfig = NETWORKS.find(item => item.id === network);
+      const networkConfig = getNetworkConfig(network);
       const hasBreak = networkConfig?.hasBreak !== false && Math.abs(Number(official.quebra || 0)) > 0.005;
       return {
         monthKey,
@@ -2976,7 +3402,7 @@ function renderMonthlySummary() {
   }
 
   els.monthlySummaryPeriod.textContent = formatMonthFilterLabel(monthKey);
-  const storeBase = getMonthlyStoreBase(monthKey);
+  const storeBase = getMonthlyStoreBase(monthKey).filter(item => isNetworkActive(item.rede));
   const availableNetworks = new Set(storeBase.map(item => item.rede));
   if (appState.monthlyDrilldown.network && !availableNetworks.has(appState.monthlyDrilldown.network)) {
     appState.monthlyDrilldown = { network: '', store: '' };
@@ -3009,14 +3435,15 @@ function renderMonthlyNetworks(monthKey) {
   destroyMonthlyStoreChart();
   destroyMonthlyNetworkHistoryChart();
 
-  let networkBase = getMonthlyAnalysisBase(monthKey);
+  let networkBase = getMonthlyAnalysisBase(monthKey).filter(item => isNetworkActive(item.rede));
   if (appState.filters.rede !== 'Todas') networkBase = networkBase.filter(item => item.rede === appState.filters.rede);
   const summaries = aggregateByNetwork(networkBase)
     .map(item => applyOfficialNetworkClosingToSummary(item, monthKey));
   const storeBase = getMonthlyStoreBase(monthKey);
+  const activeOrder = getNetworkCatalog().map(item => item.id);
   const ordered = summaries.sort((a, b) => {
-    const ai = NETWORKS.findIndex(item => item.id === a.rede);
-    const bi = NETWORKS.findIndex(item => item.id === b.rede);
+    const ai = activeOrder.indexOf(a.rede);
+    const bi = activeOrder.indexOf(b.rede);
     return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
   });
 
@@ -3531,30 +3958,31 @@ function updateViewHeader(filtered, totals) {
 }
 
 function resolveActiveMetaTarget(filtered) {
-  if (appState.filters.rede !== 'Todas') {
-    return appState.config.metasPorRede[appState.filters.rede] || 0;
-  }
+  const monthKey = getActiveMetaMonthKey(filtered);
+  const weekly = appState.filters.semana !== 'Todas';
   if (appState.filters.loja !== 'Todas') {
     const store = filtered[0];
-    return store ? getStoreMeta(store.rede, store.loja) : 0;
+    return store ? getStoreMeta(store.rede, store.loja, monthKey, weekly) : 0;
   }
-  if ((appState.filters.semana !== 'Todas' || appState.filters.mes !== 'Todas') && filtered.length) {
-    const uniqueWeeks = [...new Set(appState.data.map(item => item.semana))].length || 1;
-    return (appState.config.metaGeral || 0) / uniqueWeeks;
+  if (appState.filters.rede !== 'Todas') {
+    return resolveNetworkMetaForView(appState.filters.rede, monthKey, weekly);
   }
-  return appState.config.metaGeral || 0;
+  const monthlyMeta = getMonthlyCompanyMeta(monthKey);
+  return weekly ? monthlyMeta / getWeekDivisorForMonth(monthKey) : monthlyMeta;
 }
 
 function getRowMeta(item) {
   return getStoreMeta(item.rede, item.loja);
 }
 
-function getStoreMeta(rede, loja) {
-  const monthKey = appState.filters.mes !== 'Todas' ? appState.filters.mes : getLatestImportMonthKey();
-  const source = monthKey ? getMonthlyNetworkBase(monthKey) : [...appState.data, ...appState.storeData];
+function getStoreMeta(rede, loja, monthKey = '', weekly = appState.filters.semana !== 'Todas') {
+  const resolvedMonth = monthKey || (appState.filters.mes !== 'Todas' ? appState.filters.mes : getLatestImportMonthKey());
+  const source = resolvedMonth ? getMonthlyNetworkBase(resolvedMonth) : [...appState.data, ...appState.storeData];
   const monthlyNetworkRecords = source.filter(record => record.rede === rede && !record.isNetworkTotalOnly);
-  const uniqueStores = [...new Set(monthlyNetworkRecords.map(record => record.loja))].length || 1;
-  return (appState.config.metasPorRede[rede] || 0) / uniqueStores;
+  const uniqueStores = [...new Set(monthlyNetworkRecords.map(record => record.loja).filter(Boolean))].length || 1;
+  const monthlyNetworkMeta = getMonthlyNetworkMeta(resolvedMonth, rede);
+  const storeMonthlyMeta = monthlyNetworkMeta / uniqueStores;
+  return weekly ? storeMonthlyMeta / getWeekDivisorForMonth(resolvedMonth) : storeMonthlyMeta;
 }
 
 function aggregateRecords(records) {

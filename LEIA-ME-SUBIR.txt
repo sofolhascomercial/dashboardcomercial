@@ -40,3 +40,19 @@ ATUALIZAÇÃO 06/10/2026 — SETEMBRO OFICIAL
 - A diferença de R$ 2.713,30 na quebra detalhada do DIA A DIA foi desconsiderada
   no fechamento oficial, conforme orientação do usuário. O detalhamento por loja
   permanece vindo das abas detalhadas.
+
+
+ATUALIZAÇÃO 29/10/2026 — ADM, METAS MENSAIS E GESTÃO DE REDES
+- Corrigida a meta mensal: filtrar apenas um mês NÃO divide mais a meta por semanas.
+- A meta semanal só é proporcionalizada quando uma semana específica é filtrada.
+- Novo ADM com navegação lateral e uma área por função.
+- Novo cadastro de Metas Mensais por rede; a Meta Geral do mês é a soma automática das redes ativas.
+- As metas padrão continuam disponíveis como fallback para meses ainda sem cadastro específico.
+- Nova Gestão de Redes: adicionar rede, ativar/inativar e definir se acompanha quebra.
+- Rede inativa some do dashboard, filtros, rankings e gráficos, sem apagar histórico.
+- Novas redes ficam persistidas na configuração do painel e podem ser usadas nas importações.
+- historico-2026.js, setembro-2026.js e firebase-config.js não tiveram os dados alterados nesta revisão.
+
+VALIDAÇÃO
+- script.js validado com node --check.
+- Testes de lógica confirmaram: meta mensal inteira, meta semanal proporcional, ocultação de rede inativa e persistência de metas/rede.

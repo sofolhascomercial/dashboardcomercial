@@ -386,228 +386,198 @@
     </div>
   </div>
 
-  <div id="admModal" class="modal modal--wide" hidden>
-    <div class="modal__panel">
-      <div class="modal__head">
-        <div>
-          <p class="eyebrow">Administração</p>
-          <h3>Painel ADM</h3>
-        </div>
-        <button id="closeAdmModalBtn" class="icon-btn" type="button">✕</button>
-      </div>
-      <div class="modal__body modal__body--stacked">
-        <div class="adm-shell">
+  <div id="admModal" class="modal modal--wide adm-modal" hidden>
+    <div class="modal__panel adm-modal__panel">
+      <div id="admShell" class="adm-shell">
+        <aside class="adm-sidebar" aria-label="Navegação administrativa">
+          <div class="adm-sidebar__brand">
+            <div class="adm-sidebar__mark">SF</div>
+            <div>
+              <span>Administração</span>
+              <strong>Só Folhas</strong>
+            </div>
+          </div>
+
           <nav class="adm-nav" aria-label="Seções administrativas">
-            <button type="button" class="adm-nav__item is-active" data-adm-tab="metas">Metas</button>
-            <button type="button" class="adm-nav__item" data-adm-tab="importacao">Importações</button>
-            <button type="button" class="adm-nav__item" data-adm-tab="historico">Histórico</button>
-            <button type="button" class="adm-nav__item" data-adm-tab="registros">Registros</button>
+            <button type="button" class="adm-nav__item is-active" data-adm-tab="overview"><span class="adm-nav__icon">▦</span><span>Visão Geral</span></button>
+            <button type="button" class="adm-nav__item" data-adm-tab="metas-mensais"><span class="adm-nav__icon">◎</span><span>Metas Mensais</span></button>
+            <button type="button" class="adm-nav__item" data-adm-tab="redes"><span class="adm-nav__icon">◫</span><span>Gestão de Redes</span></button>
+            <button type="button" class="adm-nav__item" data-adm-tab="import-rede"><span class="adm-nav__icon">⇧</span><span>Importar por Rede</span></button>
+            <button type="button" class="adm-nav__item" data-adm-tab="import-loja"><span class="adm-nav__icon">⇧</span><span>Importar por Loja</span></button>
+            <button type="button" class="adm-nav__item" data-adm-tab="historico"><span class="adm-nav__icon">◷</span><span>Histórico</span></button>
+            <button type="button" class="adm-nav__item" data-adm-tab="registros"><span class="adm-nav__icon">≡</span><span>Registros</span></button>
           </nav>
 
+          <div class="adm-sidebar__foot">
+            <span>Configurações e dados</span>
+            <small>Alterações salvas no painel</small>
+          </div>
+        </aside>
+        <button id="admSidebarBackdrop" class="adm-sidebar-backdrop" type="button" aria-label="Fechar menu administrativo" hidden></button>
+
+        <section class="adm-workspace">
+          <header class="adm-workspace__topbar">
+            <div class="adm-workspace__title">
+              <button id="admSidebarToggleBtn" class="icon-btn adm-sidebar-toggle" type="button" aria-label="Abrir menu administrativo">☰</button>
+              <div>
+                <p class="eyebrow">Painel ADM</p>
+                <h3 id="admSectionTitle">Visão Geral</h3>
+              </div>
+            </div>
+            <button id="closeAdmModalBtn" class="icon-btn" type="button" aria-label="Fechar administração">✕</button>
+          </header>
+
           <div class="adm-panels">
-            <section class="adm-panel is-active" data-adm-panel="metas">
-              <section class="card admin-card">
-                <div class="section-head">
-                  <h4>Metas</h4>
+            <section class="adm-panel is-active" data-adm-panel="overview">
+              <div class="adm-page-head">
+                <div>
+                  <p class="eyebrow">Central administrativa</p>
+                  <h4>Visão Geral</h4>
+                  <p class="section-note">Acesse metas, redes e importações sem sair desta área.</p>
                 </div>
-                <div class="field">
-                  <label for="metaGeralInput">Meta total de venda</label>
-                  <input id="metaGeralInput" type="text" inputmode="decimal" autocomplete="off" placeholder="R$ 0,00" />
+              </div>
+              <div id="adminOverviewCards" class="adm-overview-grid"></div>
+              <div class="adm-quick-grid">
+                <button type="button" class="adm-quick-card" data-adm-jump="metas-mensais"><span>◎</span><strong>Metas Mensais</strong><small>Defina metas por mês e rede</small></button>
+                <button type="button" class="adm-quick-card" data-adm-jump="redes"><span>◫</span><strong>Gestão de Redes</strong><small>Adicione, ative ou inative redes</small></button>
+                <button type="button" class="adm-quick-card" data-adm-jump="import-rede"><span>⇧</span><strong>Importar por Rede</strong><small>Atualize os números executivos</small></button>
+                <button type="button" class="adm-quick-card" data-adm-jump="historico"><span>◷</span><strong>Histórico</strong><small>Confira e gerencie importações</small></button>
+              </div>
+            </section>
+
+            <section class="adm-panel" data-adm-panel="metas-mensais" hidden>
+              <div class="adm-page-head">
+                <div>
+                  <p class="eyebrow">Planejamento comercial</p>
+                  <h4>Metas Mensais</h4>
+                  <p class="section-note">A meta geral do mês é a soma automática das metas das redes ativas. Ao filtrar apenas o mês, a meta permanece inteira.</p>
                 </div>
-                <div id="metasRedeForm" class="admin-grid"></div>
-                <button id="saveGoalsBtn" class="btn btn--primary" type="button">Salvar metas</button>
+              </div>
+              <section class="card admin-card admin-card--full">
+                <div class="monthly-goal-toolbar">
+                  <div class="field">
+                    <label for="monthlyGoalMonthInput">Mês de referência</label>
+                    <input id="monthlyGoalMonthInput" type="month" min="2026-01" />
+                  </div>
+                  <div class="field">
+                    <label for="monthlyGoalTotalInput">Meta geral do mês</label>
+                    <input id="monthlyGoalTotalInput" type="text" readonly placeholder="R$ 0,00" />
+                  </div>
+                </div>
+                <div id="monthlyGoalsForm" class="admin-grid monthly-goals-grid"></div>
+                <div class="admin-actions">
+                  <button id="saveMonthlyGoalsBtn" class="btn btn--primary" type="button">Salvar metas do mês</button>
+                  <span id="monthlyGoalsFeedback" class="feedback" aria-live="polite"></span>
+                </div>
+              </section>
+
+              <details class="card admin-card admin-card--full adm-fallback-card">
+                <summary>Metas padrão (usadas quando um mês ainda não possui meta específica)</summary>
+                <div class="adm-fallback-card__body">
+                  <div class="field">
+                    <label for="metaGeralInput">Meta padrão total</label>
+                    <input id="metaGeralInput" type="text" inputmode="decimal" autocomplete="off" placeholder="R$ 0,00" />
+                  </div>
+                  <div id="metasRedeForm" class="admin-grid"></div>
+                  <button id="saveGoalsBtn" class="btn btn--ghost" type="button">Salvar metas padrão</button>
+                </div>
+              </details>
+            </section>
+
+            <section class="adm-panel" data-adm-panel="redes" hidden>
+              <div class="adm-page-head">
+                <div>
+                  <p class="eyebrow">Estrutura comercial</p>
+                  <h4>Gestão de Redes</h4>
+                  <p class="section-note">Redes inativas deixam de aparecer no dashboard, filtros, rankings e gráficos, mas o histórico não é apagado.</p>
+                </div>
+              </div>
+              <section class="card admin-card admin-card--full">
+                <div class="network-add-grid">
+                  <div class="field">
+                    <label for="newNetworkNameInput">Nome da nova rede</label>
+                    <input id="newNetworkNameInput" type="text" autocomplete="off" placeholder="Ex.: NOVA REDE" />
+                  </div>
+                  <div class="field">
+                    <label for="newNetworkBreakInput">Acompanha quebra?</label>
+                    <select id="newNetworkBreakInput">
+                      <option value="true">Sim — Venda + Quebra</option>
+                      <option value="false">Não — Somente Venda</option>
+                    </select>
+                  </div>
+                  <button id="addNetworkBtn" class="btn btn--primary network-add-btn" type="button">Adicionar rede</button>
+                </div>
+                <p id="networkManagementFeedback" class="feedback"></p>
+                <div class="table-wrap network-management-wrap">
+                  <table class="network-management-table">
+                    <thead><tr><th>Rede</th><th>Status</th><th>Acompanhamento</th><th>Ação</th></tr></thead>
+                    <tbody id="networkManagementBody"></tbody>
+                  </table>
+                </div>
               </section>
             </section>
 
-            <section class="adm-panel" data-adm-panel="importacao" hidden>
-              <div class="import-mode-grid">
-                <section class="card admin-card import-mode-card">
-                  <div class="import-mode-card__head">
-                    <div class="import-mode-icon">R</div>
-                    <div>
-                      <p class="eyebrow">Base executiva</p>
-                      <h4>Importação por Rede</h4>
-                      <p class="section-note">Alimenta o resumo geral, totais por rede, metas, rankings e indicadores executivos.</p>
-                    </div>
-                  </div>
-                  <div class="admin-grid admin-grid--period">
-                    <div class="field">
-                      <label for="monthInput">Mês da planilha</label>
-                      <select id="monthInput">
-                        <option value="">Selecionar mês</option>
-                        <option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option>
-                        <option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option>
-                        <option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option>
-                        <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
-                      </select>
-                    </div>
-                    <div class="field">
-                      <label for="weekInput">Semana do mês</label>
-                      <select id="weekInput">
-                        <option value="">Selecionar semana</option>
-                        <option value="1ª semana">1ª semana</option><option value="2ª semana">2ª semana</option>
-                        <option value="3ª semana">3ª semana</option><option value="4ª semana">4ª semana</option><option value="5ª semana">5ª semana</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="field">
-                    <label for="excelFileInput">Planilha semanal por rede</label>
-                    <input id="excelFileInput" type="file" accept=".xlsx,.xls" />
-                  </div>
-                  <button id="importExcelBtn" class="btn btn--primary" type="button">Importar por Rede</button>
-                  <p class="helper">Se o mesmo mês e semana forem importados novamente, a base anterior desse período é substituída para evitar duplicidade.</p>
-                  <p id="importFeedback" class="feedback"></p>
-                </section>
-
-                <section class="card admin-card import-mode-card import-mode-card--store">
-                  <div class="import-mode-card__head">
-                    <div class="import-mode-icon">L</div>
-                    <div>
-                      <p class="eyebrow">Detalhamento operacional</p>
-                      <h4>Importação por Loja</h4>
-                      <p class="section-note">Alimenta o Resumo Mensal interativo: rede → lojas → resultado semanal de cada loja.</p>
-                    </div>
-                  </div>
-                  <div class="admin-grid admin-grid--period">
-                    <div class="field">
-                      <label for="storeMonthInput">Mês da planilha</label>
-                      <select id="storeMonthInput">
-                        <option value="">Selecionar mês</option>
-                        <option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option>
-                        <option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option>
-                        <option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option>
-                        <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
-                      </select>
-                    </div>
-                    <div class="field">
-                      <label for="storeWeekInput">Semana do mês</label>
-                      <select id="storeWeekInput">
-                        <option value="">Selecionar semana</option>
-                        <option value="1ª semana">1ª semana</option><option value="2ª semana">2ª semana</option>
-                        <option value="3ª semana">3ª semana</option><option value="4ª semana">4ª semana</option><option value="5ª semana">5ª semana</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="field">
-                    <label for="storeExcelFileInput">Planilha semanal por loja</label>
-                    <input id="storeExcelFileInput" type="file" accept=".xlsx,.xls" />
-                  </div>
-                  <button id="importStoreExcelBtn" class="btn btn--primary" type="button">Importar por Loja</button>
-                  <p class="helper">Modelo reconhecido: abas por rede com uma linha por loja e uma linha “Total” para conferência. O arquivo BASE DASH POR LOJAS já segue esse padrão.</p>
-                  <p id="storeImportFeedback" class="feedback"></p>
-                </section>
+            <section class="adm-panel" data-adm-panel="import-rede" hidden>
+              <div class="adm-page-head">
+                <div><p class="eyebrow">Base executiva</p><h4>Importação por Rede</h4><p class="section-note">Alimenta o resumo geral, totais por rede, rankings e indicadores executivos.</p></div>
               </div>
+              <section class="card admin-card import-mode-card">
+                <div class="admin-grid admin-grid--period">
+                  <div class="field"><label for="monthInput">Mês da planilha</label><select id="monthInput"><option value="">Selecionar mês</option><option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option><option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option><option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option><option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option></select></div>
+                  <div class="field"><label for="weekInput">Semana do mês</label><select id="weekInput"><option value="">Selecionar semana</option><option value="1ª semana">1ª semana</option><option value="2ª semana">2ª semana</option><option value="3ª semana">3ª semana</option><option value="4ª semana">4ª semana</option><option value="5ª semana">5ª semana</option></select></div>
+                </div>
+                <div class="field"><label for="excelFileInput">Planilha semanal por rede</label><input id="excelFileInput" type="file" accept=".xlsx,.xls" /></div>
+                <button id="importExcelBtn" class="btn btn--primary" type="button">Importar por Rede</button>
+                <p class="helper">Reimportar o mesmo mês e semana substitui a base anterior do período, evitando duplicidade.</p>
+                <p id="importFeedback" class="feedback"></p>
+              </section>
+            </section>
+
+            <section class="adm-panel" data-adm-panel="import-loja" hidden>
+              <div class="adm-page-head">
+                <div><p class="eyebrow">Detalhamento operacional</p><h4>Importação por Loja</h4><p class="section-note">Alimenta o Resumo Mensal interativo: rede → lojas → resultado semanal.</p></div>
+              </div>
+              <section class="card admin-card import-mode-card import-mode-card--store">
+                <div class="admin-grid admin-grid--period">
+                  <div class="field"><label for="storeMonthInput">Mês da planilha</label><select id="storeMonthInput"><option value="">Selecionar mês</option><option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option><option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option><option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option><option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option></select></div>
+                  <div class="field"><label for="storeWeekInput">Semana do mês</label><select id="storeWeekInput"><option value="">Selecionar semana</option><option value="1ª semana">1ª semana</option><option value="2ª semana">2ª semana</option><option value="3ª semana">3ª semana</option><option value="4ª semana">4ª semana</option><option value="5ª semana">5ª semana</option></select></div>
+                </div>
+                <div class="field"><label for="storeExcelFileInput">Planilha semanal por loja</label><input id="storeExcelFileInput" type="file" accept=".xlsx,.xls" /></div>
+                <button id="importStoreExcelBtn" class="btn btn--primary" type="button">Importar por Loja</button>
+                <p class="helper">Modelo: abas por rede, uma linha por loja e linha “Total” para conferência.</p>
+                <p id="storeImportFeedback" class="feedback"></p>
+              </section>
             </section>
 
             <section class="adm-panel" data-adm-panel="historico" hidden>
               <section class="card admin-card admin-card--full">
-                <div class="section-head section-head--stack-mobile">
-                  <div>
-                    <h4>Histórico das planilhas</h4>
-                    <p class="section-note">Excluir uma planilha remove também todos os dados importados por ela.</p>
-                  </div>
-                  <div>
-                    <p class="card-label">Planilhas salvas</p>
-                    <strong id="importBatchCount">0</strong>
-                  </div>
-                </div>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Arquivo</th>
-                        <th>Período</th>
-                        <th>Importado em</th>
-                        <th>Registros</th>
-                        <th>Venda</th>
-                        <th>Quebra</th>
-                        <th>Conferência</th>
-                        <th>Ação</th>
-                      </tr>
-                    </thead>
-                    <tbody id="importBatchesTableBody"></tbody>
-                  </table>
-                </div>
+                <div class="section-head section-head--stack-mobile"><div><h4>Histórico das planilhas por rede</h4><p class="section-note">Excluir uma planilha remove também os dados importados por ela.</p></div><div><p class="card-label">Planilhas salvas</p><strong id="importBatchCount">0</strong></div></div>
+                <div class="table-wrap"><table><thead><tr><th>Arquivo</th><th>Período</th><th>Importado em</th><th>Registros</th><th>Venda</th><th>Quebra</th><th>Conferência</th><th>Ação</th></tr></thead><tbody id="importBatchesTableBody"></tbody></table></div>
               </section>
-
               <section class="card admin-card admin-card--full store-history-card">
-                <div class="section-head section-head--stack-mobile">
-                  <div>
-                    <h4>Histórico do detalhamento por loja</h4>
-                    <p class="section-note">Estas bases alimentam exclusivamente o drill-down mensal de rede → loja → semanas.</p>
-                  </div>
-                  <div>
-                    <p class="card-label">Planilhas por loja</p>
-                    <strong id="storeImportBatchCount">0</strong>
-                  </div>
-                </div>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr><th>Arquivo</th><th>Período</th><th>Registros</th><th>Redes</th><th>Venda</th><th>Quebra</th><th>Status</th><th>Ação</th></tr>
-                    </thead>
-                    <tbody id="storeImportBatchesTableBody"></tbody>
-                  </table>
-                </div>
+                <div class="section-head section-head--stack-mobile"><div><h4>Histórico do detalhamento por loja</h4><p class="section-note">Bases usadas no drill-down mensal.</p></div><div><p class="card-label">Planilhas por loja</p><strong id="storeImportBatchCount">0</strong></div></div>
+                <div class="table-wrap"><table><thead><tr><th>Arquivo</th><th>Período</th><th>Registros</th><th>Redes</th><th>Venda</th><th>Quebra</th><th>Status</th><th>Ação</th></tr></thead><tbody id="storeImportBatchesTableBody"></tbody></table></div>
               </section>
             </section>
-
-            <div id="verificationModal" class="modal" hidden>
-              <div class="modal__panel modal__panel--verification">
-                <div class="modal__head">
-                  <div>
-                    <p class="card-label">Conferência da importação</p>
-                    <h3 id="verificationModalTitle">Detalhes da divergência</h3>
-                  </div>
-                  <button id="closeVerificationModalBtn" class="icon-btn" type="button" aria-label="Fechar detalhes da divergência">✕</button>
-                </div>
-                <div class="modal__body modal__body--stacked">
-                  <div class="verification-modal__meta">
-                    <div class="verification-meta-card">
-                      <span>Arquivo</span>
-                      <strong id="verificationModalFileName">—</strong>
-                    </div>
-                    <div class="verification-meta-card">
-                      <span>Período</span>
-                      <strong id="verificationModalPeriod">—</strong>
-                    </div>
-                    <div class="verification-meta-card">
-                      <span>Status</span>
-                      <strong id="verificationModalStatus">—</strong>
-                    </div>
-                  </div>
-                  <div id="verificationModalBody" class="verification-modal__body"></div>
-                </div>
-              </div>
-            </div>
 
             <section class="adm-panel" data-adm-panel="registros" hidden>
               <section class="card admin-card admin-card--full">
-                <div class="section-head">
-                  <h4>Registros importados</h4>
-                </div>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Rede</th>
-                        <th>Loja</th>
-                        <th>Semana</th>
-                        <th>Venda</th>
-                        <th>Quebra</th>
-                        <th>Falta</th>
-                        <th>Qualidade</th>
-                        <th>Estoque</th>
-                        <th>% Quebra</th>
-                      </tr>
-                    </thead>
-                    <tbody id="adminTableBody"></tbody>
-                  </table>
-                </div>
+                <div class="section-head"><div><h4>Registros importados</h4><p class="section-note">Consulta técnica dos registros mantidos na base.</p></div></div>
+                <div class="table-wrap"><table><thead><tr><th>Rede</th><th>Loja</th><th>Semana</th><th>Venda</th><th>Quebra</th><th>Falta</th><th>Qualidade</th><th>Estoque</th><th>% Quebra</th></tr></thead><tbody id="adminTableBody"></tbody></table></div>
               </section>
             </section>
           </div>
-        </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="verificationModal" class="modal" hidden>
+    <div class="modal__panel modal__panel--verification">
+      <div class="modal__head"><div><p class="card-label">Conferência da importação</p><h3 id="verificationModalTitle">Detalhes da divergência</h3></div><button id="closeVerificationModalBtn" class="icon-btn" type="button" aria-label="Fechar detalhes da divergência">✕</button></div>
+      <div class="modal__body modal__body--stacked">
+        <div class="verification-modal__meta"><div class="verification-meta-card"><span>Arquivo</span><strong id="verificationModalFileName">—</strong></div><div class="verification-meta-card"><span>Período</span><strong id="verificationModalPeriod">—</strong></div><div class="verification-meta-card"><span>Status</span><strong id="verificationModalStatus">—</strong></div></div>
+        <div id="verificationModalBody" class="verification-modal__body"></div>
       </div>
     </div>
   </div>
@@ -617,8 +587,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <script src="firebase-config.js"></script>
-  <script src="historico-2026.js?v=20261006-setembro-oficial-v3"></script>
-  <script src="setembro-2026.js?v=20261006-setembro-oficial-v3"></script>
-  <script src="script.js?v=20261006-setembro-oficial-v3"></script>
+  <script src="historico-2026.js?v=20261029-adm-redes-metas-v1"></script>
+  <script src="setembro-2026.js?v=20261029-adm-redes-metas-v1"></script>
+  <script src="script.js?v=20261029-adm-redes-metas-v1"></script>
 </body>
 </html>
